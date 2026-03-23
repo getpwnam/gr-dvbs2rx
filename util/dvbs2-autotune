@@ -1,0 +1,633 @@
+#!/usr/bin/env python3
+"""Autotune dvbs2-rx parameters from scan results.
+
+This utility is intentionally separate from the main scanning/receiver code.
+It accepts scan results (JSON or CSV), builds trial configurations, runs
+dvbs2-rx headlessly with monitoring enabled, and ranks candidates by score.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import itertools
+import json
+import math
+import random
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+def _to_float(value: Any, default: float | None = None) -> float | None:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_get(dct: dict[str, Any], keys: list[str], default: Any = None) -> Any:
+    for key in keys:
+        if key in dct:
+            return dct[key]
+    return default
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return int(s.getsockname()[1])
+
+
+@dataclass
+class Candidate:
+    freq_hz: float
+    sym_rate: float
+    score_hint: float
+
+
+@dataclass
+class Trial:
+    freq_hz: float
+    sym_rate: float
+    rolloff: float
+    inversion: bool
+    gain: float
+
+    def key(self) -> tuple[float, float, float, bool, float]:
+        return (
+            round(self.freq_hz, 3),
+            round(self.sym_rate, 3),
+            round(self.rolloff, 4),
+            self.inversion,
+            round(self.gain, 3),
+        )
+
+
+@dataclass
+class TrialResult:
+    trial: Trial
+    score: float
+    lock_ratio: float
+    snr_peak: float
+    ts_rate: float
+    best_stats: dict[str, Any]
+    error: str | None = None
+
+
+def load_scan_candidates(path: Path, default_sym_rate: float) -> list[Candidate]:
+    if path.suffix.lower() == ".csv":
+        return _load_candidates_csv(path, default_sym_rate)
+    return _load_candidates_json(path, default_sym_rate)
+
+
+def _load_candidates_csv(path: Path, default_sym_rate: float) -> list[Candidate]:
+    out: list[Candidate] = []
+    with path.open("r", encoding="utf-8", newline="") as fd:
+        reader = csv.DictReader(fd)
+        for row in reader:
+            freq = _to_float(_safe_get(row, ["freq", "frequency", "freq_hz"]))
+            if freq is None:
+                continue
+            sym_rate = _to_float(
+                _safe_get(row, ["sym_rate", "symbol_rate", "sr"]),
+                default_sym_rate,
+            )
+            hint = _to_float(_safe_get(row, ["score", "snr", "power"]), 0.0) or 0.0
+            out.append(Candidate(freq_hz=freq, sym_rate=sym_rate, score_hint=hint))
+    return out
+
+
+def load_cli_candidates(
+    freq_candidates: list[float] | None,
+    sym_rate_candidates: list[float] | None,
+    default_sym_rate: float,
+) -> list[Candidate]:
+    freqs = freq_candidates or []
+    if not freqs:
+        return []
+
+    sym_rates = sym_rate_candidates or []
+    if not sym_rates:
+        sym_rates = [default_sym_rate]
+
+    # If one sym-rate is given, apply it to all frequencies.
+    if len(sym_rates) == 1:
+        return [
+            Candidate(freq_hz=f, sym_rate=sym_rates[0], score_hint=0.0)
+            for f in freqs
+        ]
+
+    # If lengths match, map each sym-rate to the corresponding frequency.
+    if len(sym_rates) == len(freqs):
+        return [
+            Candidate(freq_hz=freqs[i], sym_rate=sym_rates[i], score_hint=0.0)
+            for i in range(len(freqs))
+        ]
+
+    # Otherwise, use all sym-rates for each frequency.
+    out: list[Candidate] = []
+    for f in freqs:
+        for sr in sym_rates:
+            out.append(Candidate(freq_hz=f, sym_rate=sr, score_hint=0.0))
+    return out
+
+
+def _load_candidates_json(path: Path, default_sym_rate: float) -> list[Candidate]:
+    with path.open("r", encoding="utf-8") as fd:
+        data = json.load(fd)
+
+    if isinstance(data, dict):
+        rows = data.get("candidates", [])
+    elif isinstance(data, list):
+        rows = data
+    else:
+        rows = []
+
+    out: list[Candidate] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        freq = _to_float(_safe_get(row, ["freq", "frequency", "freq_hz"]))
+        if freq is None:
+            continue
+        sym_rate = _to_float(
+            _safe_get(row, ["sym_rate", "symbol_rate", "sr"]),
+            default_sym_rate,
+        )
+        hint = _to_float(_safe_get(row, ["score", "snr", "power"]), 0.0) or 0.0
+        out.append(Candidate(freq_hz=freq, sym_rate=sym_rate, score_hint=hint))
+    return out
+
+
+def build_trial_pool(
+    candidates: list[Candidate],
+    top_k_candidates: int,
+    sym_jitter_pct: float,
+    gain_center: float,
+    gain_span: float,
+    gain_steps: int,
+    rolloffs: list[float],
+    allow_inversion: bool,
+) -> list[Trial]:
+    if not candidates:
+        return []
+
+    ranked = sorted(candidates, key=lambda c: c.score_hint, reverse=True)
+    ranked = ranked[: max(1, top_k_candidates)]
+
+    sym_scales = [1.0 - sym_jitter_pct, 1.0, 1.0 + sym_jitter_pct]
+    if sym_jitter_pct <= 0:
+        sym_scales = [1.0]
+
+    if gain_steps <= 1:
+        gains = [gain_center]
+    else:
+        gains = [
+            gain_center - gain_span + i * (2 * gain_span) / (gain_steps - 1)
+            for i in range(gain_steps)
+        ]
+
+    inv_values = [False, True] if allow_inversion else [False]
+
+    trials: dict[tuple[float, float, float, bool, float], Trial] = {}
+    for c in ranked:
+        for scale, rolloff, inversion, gain in itertools.product(
+            sym_scales, rolloffs, inv_values, gains
+        ):
+            t = Trial(
+                freq_hz=c.freq_hz,
+                sym_rate=max(1.0, c.sym_rate * scale),
+                rolloff=rolloff,
+                inversion=inversion,
+                gain=gain,
+            )
+            trials[t.key()] = t
+    return list(trials.values())
+
+
+def fetch_stats(mon_port: int) -> dict[str, Any] | None:
+    url = f"http://127.0.0.1:{mon_port}"
+    try:
+        with urllib.request.urlopen(url, timeout=0.8) as response:
+            if response.status != 200:
+                return None
+            return json.loads(response.read().decode("utf-8"))
+    except (OSError, json.JSONDecodeError, urllib.error.URLError, TimeoutError):
+        return None
+
+
+def score_stats(
+    stats: dict[str, Any],
+    lock_ratio: float,
+    ts_rate: float,
+    snr_peak: float,
+) -> float:
+    locked = 1.0 if bool(stats.get("lock", False)) else 0.0
+    fec = stats.get("fec", {})
+    mpeg = stats.get("mpeg-ts", {})
+
+    fer = _to_float(fec.get("fer"), 1.0)
+    per = _to_float(mpeg.get("per"), 1.0)
+
+    snr_norm = max(0.0, min(1.0, snr_peak / 15.0))
+    ts_norm = max(0.0, min(1.0, ts_rate / 500.0))
+    fer_penalty = 0.0 if fer is None else max(0.0, min(1.0, fer))
+    per_penalty = 0.0 if per is None else max(0.0, min(1.0, per))
+
+    # Weighted score prioritizing sustained lock first, then quality metrics.
+    return (
+        100.0 * lock_ratio
+        + 80.0 * locked
+        + 25.0 * snr_norm
+        + 20.0 * ts_norm
+        - 20.0 * fer_penalty
+        - 10.0 * per_penalty
+    )
+
+
+def run_trial(
+    dvbs2_rx: str,
+    source: str,
+    soapy_device: str,
+    samp_rate: float,
+    trial: Trial,
+    timeout_s: float,
+    poll_period_s: float,
+    mon_port: int,
+    extra_args: list[str],
+) -> TrialResult:
+    cmd: list[str] = [
+        dvbs2_rx,
+        "--source",
+        source,
+        "--freq",
+        f"{trial.freq_hz}",
+        "--samp-rate",
+        f"{samp_rate}",
+        "--sym-rate",
+        f"{trial.sym_rate}",
+        "--rolloff",
+        f"{trial.rolloff}",
+        "--sink",
+        "file",
+        "--out-file",
+        "/dev/null",
+        "--mon-server",
+        "--mon-port",
+        str(mon_port),
+    ]
+
+    if source == "soapy":
+        cmd.extend(["--soapy-device", soapy_device, "--soapy-gain", f"{trial.gain}"])
+    if trial.inversion:
+        cmd.append("--spectral-inversion")
+    cmd.extend(extra_args)
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    samples = 0
+    lock_hits = 0
+    snr_peak = 0.0
+    first_packets = None
+    last_packets = None
+    best_stats: dict[str, Any] = {}
+    err_msg = None
+
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            err_msg = "dvbs2-rx exited early"
+            break
+        stats = fetch_stats(mon_port)
+        if stats is None:
+            time.sleep(min(0.3, poll_period_s))
+            continue
+
+        samples += 1
+        if bool(stats.get("lock", False)):
+            lock_hits += 1
+
+        snr = _to_float(stats.get("snr"), 0.0) or 0.0
+        snr_peak = max(snr_peak, snr)
+
+        packets = _to_float(_safe_get(stats.get("mpeg-ts", {}), ["packets"]), 0.0) or 0.0
+        if first_packets is None:
+            first_packets = packets
+        last_packets = packets
+        best_stats = stats
+
+        time.sleep(poll_period_s)
+
+    duration = max(0.001, timeout_s)
+    if first_packets is None or last_packets is None:
+        ts_rate = 0.0
+    else:
+        ts_rate = max(0.0, (last_packets - first_packets) / duration)
+
+    lock_ratio = (lock_hits / samples) if samples > 0 else 0.0
+    score = score_stats(best_stats if best_stats else {}, lock_ratio, ts_rate, snr_peak)
+
+    proc.terminate()
+    try:
+        proc.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+    if best_stats == {} and err_msg is None:
+        err_msg = "no monitor stats collected"
+
+    return TrialResult(
+        trial=trial,
+        score=score,
+        lock_ratio=lock_ratio,
+        snr_peak=snr_peak,
+        ts_rate=ts_rate,
+        best_stats=best_stats,
+        error=err_msg,
+    )
+
+
+def ucb_select(
+    trial_pool: list[Trial],
+    results_by_key: dict[tuple[float, float, float, bool, float], list[float]],
+    total_pulls: int,
+) -> Trial:
+    untried = [t for t in trial_pool if t.key() not in results_by_key]
+    if untried:
+        return random.choice(untried)
+
+    best_trial = trial_pool[0]
+    best_ucb = -math.inf
+    for t in trial_pool:
+        vals = results_by_key[t.key()]
+        mean_reward = sum(vals) / len(vals)
+        bonus = math.sqrt(2.0 * math.log(max(2, total_pulls)) / len(vals))
+        ucb = mean_reward + bonus
+        if ucb > best_ucb:
+            best_ucb = ucb
+            best_trial = t
+    return best_trial
+
+
+def parse_rolloffs(text: str) -> list[float]:
+    values = []
+    for token in text.split(","):
+        token = token.strip()
+        if token == "":
+            continue
+        try:
+            values.append(float(token))
+        except ValueError:
+            continue
+    return values if values else [0.20, 0.25, 0.35]
+
+
+def parse_extra_args(text: str) -> list[str]:
+    items = [x.strip() for x in text.split(",") if x.strip()]
+    return items
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Autotune dvbs2-rx from scan candidates (separate utility)."
+    )
+    parser.add_argument("--scan-file", default="", help="Path to scan results JSON/CSV")
+    parser.add_argument(
+        "--freq-candidate",
+        action="append",
+        type=float,
+        default=None,
+        help=(
+            "Candidate center frequency in Hz. Can be repeated to provide "
+            "multiple frequencies when not using --scan-file."
+        ),
+    )
+    parser.add_argument(
+        "--freq",
+        dest="freq_candidate",
+        action="append",
+        type=float,
+        help="Alias for --freq-candidate",
+    )
+    parser.add_argument(
+        "--sym-rate-candidate",
+        action="append",
+        type=float,
+        default=None,
+        help=(
+            "Candidate symbol rate in bauds. Can be repeated. If omitted, "
+            "--default-sym-rate is used."
+        ),
+    )
+    parser.add_argument(
+        "--sym-rate",
+        dest="sym_rate_candidate",
+        action="append",
+        type=float,
+        help="Alias for --sym-rate-candidate",
+    )
+    parser.add_argument("--dvbs2-rx-bin", default="./apps/dvbs2-rx")
+    parser.add_argument("--source", default="soapy", choices=["soapy"])
+    parser.add_argument("--soapy-device", default="")
+    parser.add_argument("--samp-rate", type=float, default=12e6)
+    parser.add_argument("--default-sym-rate", type=float, default=1.5e6)
+    parser.add_argument("--top-k-candidates", type=int, default=5)
+    parser.add_argument("--max-trials", type=int, default=24)
+    parser.add_argument("--trial-seconds", type=float, default=8.0)
+    parser.add_argument("--poll-period", type=float, default=0.5)
+    parser.add_argument("--sym-jitter-pct", type=float, default=0.05)
+    parser.add_argument("--rolloffs", default="0.20,0.25,0.35")
+    parser.add_argument("--allow-inversion", action="store_true")
+    parser.add_argument("--gain-center", type=float, default=58.0)
+    parser.add_argument("--gain-span", type=float, default=4.0)
+    parser.add_argument("--gain-steps", type=int, default=3)
+    parser.add_argument(
+        "--soapy-gain",
+        type=float,
+        default=None,
+        help=(
+            "Compatibility alias for fixed gain search point. Sets "
+            "--gain-center to this value and forces gain span/steps to one value."
+        ),
+    )
+    parser.add_argument("--extra-rx-args",
+                        default="",
+                        help="Comma-separated extra dvbs2-rx args")
+    parser.add_argument("--result-json",
+                        default="",
+                        help="Optional path to save full trial results JSON")
+    args = parser.parse_args()
+
+    if args.source == "soapy" and args.soapy_device == "":
+        print("ERROR: --soapy-device is required for soapy source", file=sys.stderr)
+        return 2
+
+    if args.soapy_gain is not None:
+        args.gain_center = args.soapy_gain
+        args.gain_span = 0.0
+        args.gain_steps = 1
+
+    candidates: list[Candidate] = []
+    if args.scan_file:
+        scan_path = Path(args.scan_file)
+        if not scan_path.exists():
+            print(f"ERROR: scan file not found: {scan_path}", file=sys.stderr)
+            return 2
+        candidates = load_scan_candidates(scan_path, args.default_sym_rate)
+    else:
+        candidates = load_cli_candidates(
+            args.freq_candidate,
+            args.sym_rate_candidate,
+            args.default_sym_rate,
+        )
+
+    if not args.scan_file and not args.freq_candidate:
+        print(
+            "ERROR: provide either --scan-file or at least one --freq-candidate",
+            file=sys.stderr,
+        )
+        return 2
+
+    if not candidates:
+        print("ERROR: no valid scan candidates found", file=sys.stderr)
+        return 2
+
+    trial_pool = build_trial_pool(
+        candidates,
+        top_k_candidates=args.top_k_candidates,
+        sym_jitter_pct=args.sym_jitter_pct,
+        gain_center=args.gain_center,
+        gain_span=args.gain_span,
+        gain_steps=max(1, args.gain_steps),
+        rolloffs=parse_rolloffs(args.rolloffs),
+        allow_inversion=args.allow_inversion,
+    )
+
+    if not trial_pool:
+        print("ERROR: no trial configurations could be built", file=sys.stderr)
+        return 2
+
+    print(
+        f"Loaded {len(candidates)} candidates; built {len(trial_pool)} trials; "
+        f"running up to {args.max_trials} UCB trials"
+    )
+
+    results_by_key: dict[tuple[float, float, float, bool, float], list[float]] = {}
+    all_results: list[TrialResult] = []
+    extra_args = parse_extra_args(args.extra_rx_args)
+
+    for i in range(1, args.max_trials + 1):
+        trial = ucb_select(trial_pool, results_by_key, total_pulls=max(1, i - 1))
+        mon_port = _find_free_port()
+
+        res = run_trial(
+            dvbs2_rx=args.dvbs2_rx_bin,
+            source=args.source,
+            soapy_device=args.soapy_device,
+            samp_rate=args.samp_rate,
+            trial=trial,
+            timeout_s=args.trial_seconds,
+            poll_period_s=args.poll_period,
+            mon_port=mon_port,
+            extra_args=extra_args,
+        )
+
+        results_by_key.setdefault(trial.key(), []).append(res.score)
+        all_results.append(res)
+
+        lock_pct = 100.0 * res.lock_ratio
+        print(
+            f"[{i:02d}/{args.max_trials}] score={res.score:7.2f} "
+            f"lock={lock_pct:5.1f}% snr_peak={res.snr_peak:5.2f} "
+            f"ts_rate={res.ts_rate:6.2f} pkt/s "
+            f"freq={trial.freq_hz:.0f} sym={trial.sym_rate:.0f} "
+            f"rolloff={trial.rolloff:.2f} inv={int(trial.inversion)} "
+            f"gain={trial.gain:.1f}"
+        )
+
+    ranked = sorted(all_results, key=lambda r: r.score, reverse=True)
+    best = ranked[0]
+
+    print("\nTop 5 trials:")
+    for idx, r in enumerate(ranked[:5], start=1):
+        t = r.trial
+        print(
+            f"{idx}. score={r.score:7.2f}, lock={100*r.lock_ratio:5.1f}%, "
+            f"snr_peak={r.snr_peak:5.2f}, ts_rate={r.ts_rate:6.2f} pkt/s, "
+            f"freq={t.freq_hz:.0f}, sym={t.sym_rate:.0f}, "
+            f"rolloff={t.rolloff:.2f}, inv={int(t.inversion)}, gain={t.gain:.1f}"
+        )
+
+    best_cmd = [
+        args.dvbs2_rx_bin,
+        "--source",
+        args.source,
+        "--soapy-device",
+        args.soapy_device,
+        "--freq",
+        str(best.trial.freq_hz),
+        "--samp-rate",
+        str(args.samp_rate),
+        "--sym-rate",
+        str(best.trial.sym_rate),
+        "--rolloff",
+        str(best.trial.rolloff),
+        "--soapy-gain",
+        str(best.trial.gain),
+        "--log-all",
+        "--gui-all",
+    ]
+    if best.trial.inversion:
+        best_cmd.append("--spectral-inversion")
+    best_cmd.extend(extra_args)
+
+    print("\nBest command:")
+    print(" ".join(best_cmd))
+
+    if args.result_json:
+        payload = {
+            "best": {
+                "score": best.score,
+                "lock_ratio": best.lock_ratio,
+                "snr_peak": best.snr_peak,
+                "ts_rate": best.ts_rate,
+                "trial": best.trial.__dict__,
+                "stats": best.best_stats,
+            },
+            "trials": [
+                {
+                    "score": r.score,
+                    "lock_ratio": r.lock_ratio,
+                    "snr_peak": r.snr_peak,
+                    "ts_rate": r.ts_rate,
+                    "error": r.error,
+                    "trial": r.trial.__dict__,
+                    "stats": r.best_stats,
+                }
+                for r in ranked
+            ],
+        }
+        out_path = Path(args.result_json)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"Saved results JSON to {out_path}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

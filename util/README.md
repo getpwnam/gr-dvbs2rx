@@ -33,3 +33,46 @@ Finally, the CLI can benchmark implementation performances using a selected reco
 ```
 
 Like the `rx` command, the `bench` command supports the `--cpu` and `--plot-cpu` options to measure and plot the CPU utilization of the receiver threads.
+
+## Scan-Driven Autotuning (Separate Utility)
+
+The `dvbs2-autotune` utility is a standalone script that automates receiver parameter search from scan results, without changing the main scan or receiver code paths.
+
+The script takes scan candidates from a JSON or CSV file and runs short headless `dvbs2-rx` trials. It polls the monitoring server (`--mon-server`) and ranks each trial using a score that prioritizes lock and decode quality.
+
+Example:
+
+```bash
+./dvbs2-autotune \
+  --scan-file /path/to/scan_results.json \\
+  --source soapy \\
+  --soapy-device "driver=remote,remote=172.17.128.253:55132,biastee=0" \\
+  --samp-rate 12e6 \\
+  --default-sym-rate 1.5e6 \\
+  --max-trials 24 \\
+  --trial-seconds 8 \\
+  --result-json autotune-results.json
+```
+
+Accepted scan formats:
+
+- JSON list of candidates, e.g. `[{"freq": 741.5e6, "sym_rate": 1.5e6, "score": 12.3}]`
+- JSON object with `candidates` list
+- CSV with headers including `freq` (or `frequency`) and optional `sym_rate` and `score`
+
+The script prints the best `dvbs2-rx` command at the end so you can launch a GUI run using the selected parameters.
+
+You can also skip the scan file entirely and pass candidates directly on the command line:
+
+```bash
+./dvbs2-autotune \
+  --freq-candidate 741.50e6 \
+  --freq-candidate 741.55e6 \
+  --sym-rate-candidate 1.5e6 \
+  --source soapy \
+  --soapy-device "driver=remote,remote=172.17.128.253:55132,biastee=0" \
+  --samp-rate 12e6 \
+  --max-trials 16
+```
+
+If only one `--sym-rate-candidate` is provided, it is applied to all frequencies.
