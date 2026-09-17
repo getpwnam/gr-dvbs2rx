@@ -32,8 +32,13 @@ xfecframe_demapper_cb_impl::xfecframe_demapper_cb_impl(dvb_framesize_t framesize
                 gr::io_signature::make(1, 1, sizeof(int8_t))),
       d_constellation(constellation),
       d_waiting_first_llr(true),
-      d_frame_cnt(0),
-      d_idx_xfecframe_buffer(0)
+    d_rowaddr0(0),
+    d_rowaddr1(0),
+    d_rowaddr2(0),
+    d_rowaddr3(0),
+    d_rowaddr4(0),
+    d_frame_cnt(0),
+    d_idx_xfecframe_buffer(0)
 {
     if (framesize == FECFRAME_NORMAL)
         d_fecframe_len = FRAME_SIZE_NORMAL;
@@ -67,6 +72,41 @@ xfecframe_demapper_cb_impl::xfecframe_demapper_cb_impl(dvb_framesize_t framesize
             d_rowaddr1 = rows;
             d_rowaddr2 = rows * 2;
         }
+    } else if (constellation == MOD_32APSK) {
+        float outer_inner_ratio;
+        float middle_inner_ratio;
+        switch (rate) {
+        case C3_4:
+            outer_inner_ratio = 5.27;
+            middle_inner_ratio = 2.84;
+            break;
+        case C4_5:
+            outer_inner_ratio = 4.87;
+            middle_inner_ratio = 2.72;
+            break;
+        case C5_6:
+            outer_inner_ratio = 4.64;
+            middle_inner_ratio = 2.64;
+            break;
+        case C8_9:
+            outer_inner_ratio = 4.33;
+            middle_inner_ratio = 2.54;
+            break;
+        case C9_10:
+            outer_inner_ratio = 4.30;
+            middle_inner_ratio = 2.53;
+            break;
+        default:
+            throw std::runtime_error("Unsupported 32APSK code rate");
+        }
+        d_mod = new AmplitudePhaseShiftKeying<32, gr_complex, int8_t>(
+            outer_inner_ratio, middle_inner_ratio);
+        unsigned int rows = d_fecframe_len / d_mod->bits();
+        d_rowaddr0 = 0;
+        d_rowaddr1 = rows;
+        d_rowaddr2 = rows * 2;
+        d_rowaddr3 = rows * 3;
+        d_rowaddr4 = rows * 4;
     } else {
         throw std::runtime_error("Unsupported constellation");
     }
@@ -90,7 +130,7 @@ xfecframe_demapper_cb_impl::xfecframe_demapper_cb_impl(dvb_framesize_t framesize
     set_msg_handler(d_pdu_port_id, [this](pmt::pmt_t pdu) { this->handle_llr_pdu(pdu); });
 }
 
-xfecframe_demapper_cb_impl::~xfecframe_demapper_cb_impl() {}
+xfecframe_demapper_cb_impl::~xfecframe_demapper_cb_impl() { delete d_mod; }
 
 void xfecframe_demapper_cb_impl::forecast(int noutput_items,
                                           gr_vector_int& ninput_items_required)
@@ -159,20 +199,19 @@ int xfecframe_demapper_cb_impl::general_work(int noutput_items,
         }
 
         // Deinterleave
-        if (d_constellation == MOD_8PSK) {
-            int8_t *c1, *c2, *c3;
-            c1 = &out[d_rowaddr0];
-            c2 = &out[d_rowaddr1];
-            c3 = &out[d_rowaddr2];
+        if (d_constellation == MOD_8PSK || d_constellation == MOD_32APSK) {
+            int8_t* columns[] = { &out[d_rowaddr0],
+                                  &out[d_rowaddr1],
+                                  &out[d_rowaddr2],
+                                  &out[d_rowaddr3],
+                                  &out[d_rowaddr4] };
             // The block interleaver has n_mod columns and "fecframe_len / n_mod" rows.
             // The latter is equal to the xfecframe_len.
             int indexin = 0;
             int8_t* p_soft = d_aux_8i_buffer.data();
-            for (unsigned int j = 0; j < d_xfecframe_len; j++) {
-                c1[j] = p_soft[indexin++];
-                c2[j] = p_soft[indexin++];
-                c3[j] = p_soft[indexin++];
-            }
+            for (unsigned int j = 0; j < d_xfecframe_len; j++)
+                for (int bit = 0; bit < n_mod; bit++)
+                    columns[bit][j] = p_soft[indexin++];
         }
 
         in += d_xfecframe_len;
@@ -270,8 +309,7 @@ void xfecframe_demapper_cb_impl::handle_llr_pdu(pmt::pmt_t pdu)
         const gr_complex* p_xfecframe = d_xfecframe_buffer_pool[buffer_idx].data();
         if (d_constellation == MOD_QPSK) {
             snr_lin_accum += d_qpsk->estimate_snr(p_xfecframe, p_llr, d_xfecframe_len);
-        } else if (d_constellation == MOD_8PSK) {
-            int8_t *c1, *c2, *c3;
+        } else {
             // Map the soft LDPC-decoded output to +-1 and use those to remap into the
             // corresponding constellation symbols. Then, refine the SNR estimate.
             int8_t* tempu = d_aux_8i_buffer.data();
@@ -279,22 +317,22 @@ void xfecframe_demapper_cb_impl::handle_llr_pdu(pmt::pmt_t pdu)
             for (unsigned int j = 0; j < d_fecframe_len; j++) {
                 tempu[j] = p_llr[j] < 0 ? -1 : 1;
             }
-            c1 = &tempu[d_rowaddr0];
-            c2 = &tempu[d_rowaddr1];
-            c3 = &tempu[d_rowaddr2];
+            int8_t* columns[] = { &tempu[d_rowaddr0],
+                                  &tempu[d_rowaddr1],
+                                  &tempu[d_rowaddr2],
+                                  &tempu[d_rowaddr3],
+                                  &tempu[d_rowaddr4] };
 
             // The block interleaver has n_mod columns and "fecframe_len / n_mod" rows.
             // The latter is equal to the xfecframe_len.
             int indexout = 0;
-            for (unsigned int j = 0; j < d_xfecframe_len; j++) {
-                tempv[indexout++] = c1[j];
-                tempv[indexout++] = c2[j];
-                tempv[indexout++] = c3[j];
-            }
+            const int n_mod = d_mod->bits();
+            for (unsigned int j = 0; j < d_xfecframe_len; j++)
+                for (int bit = 0; bit < n_mod; bit++)
+                    tempv[indexout++] = columns[bit][j];
 
             float sp = 0;
             float np = 0;
-            const int n_mod = d_mod->bits();
 
             for (unsigned int j = 0; j < d_xfecframe_len; j++) {
                 gr_complex s = d_mod->map(&tempv[(j * n_mod)]);

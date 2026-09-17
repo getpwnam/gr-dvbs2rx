@@ -73,7 +73,9 @@ class qa_params(gr_unittest.TestCase):
                    ('qpsk', '1/2'), ('qpsk', '3/5'), ('qpsk', '2/3'),
                    ('qpsk', '3/4'), ('qpsk', '4/5'), ('qpsk', '5/6'),
                    ('qpsk', '8/9'), ('8psk', '3/5'), ('8psk', '2/3'),
-                   ('8psk', '3/4'), ('8psk', '5/6'), ('8psk', '8/9')]
+                   ('8psk', '3/4'), ('8psk', '5/6'), ('8psk', '8/9'),
+                   ('32apsk', '3/4'), ('32apsk', '4/5'),
+                   ('32apsk', '5/6'), ('32apsk', '8/9')]
         for frame_size in ['normal', 'short']:
             for const, code in modcods:
                 self.assertTrue(
@@ -102,7 +104,9 @@ class qa_params(gr_unittest.TestCase):
                    ('qpsk', '3/4'), ('qpsk', '4/5'), ('qpsk', '5/6'),
                    ('qpsk', '8/9'), ('qpsk', '9/10'), ('8psk', '3/5'),
                    ('8psk', '2/3'), ('8psk', '3/4'), ('8psk', '5/6'),
-                   ('8psk', '8/9'), ('8psk', '9/10')]
+                   ('8psk', '8/9'), ('8psk', '9/10'), ('32apsk', '3/4'),
+                   ('32apsk', '4/5'), ('32apsk', '5/6'), ('32apsk', '8/9'),
+                   ('32apsk', '9/10')]
         for const, code in modcods:
             t_params = dvbs2rx.params.translate(standard, frame_size, code,
                                                 const)

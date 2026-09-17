@@ -30,6 +30,10 @@ constellations = {
     '8PSK': {
         'def': 'MOD_8PSK',
         'standard': ['DVB-S2']
+    },
+    '32APSK': {
+        'def': 'MOD_32APSK',
+        'standard': ['DVB-S2']
     }
 }
 
