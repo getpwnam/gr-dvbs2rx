@@ -8,6 +8,7 @@
 #ifndef INCLUDED_DVBS2RX_XFECFRAME_DEMAPPER_CB_IMPL_H
 #define INCLUDED_DVBS2RX_XFECFRAME_DEMAPPER_CB_IMPL_H
 
+#include "apsk.hh"
 #include "cpu_features_macros.h"
 #include "psk.hh"
 #include "qpsk.h"
@@ -41,6 +42,8 @@ private:
     unsigned int d_rowaddr0;
     unsigned int d_rowaddr1;
     unsigned int d_rowaddr2;
+    unsigned int d_rowaddr3;
+    unsigned int d_rowaddr4;
     float d_snr; /**< Estimated SNR in dB */
     float d_N0;  /**< Estimated noise energy per complex dimension */
     float d_precision;
