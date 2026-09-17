@@ -7,6 +7,7 @@
 #define APSK_HH
 
 #include "modulation.hh"
+#include <cstdint>
 #include <algorithm>
 #include <array>
 #include <cmath>
