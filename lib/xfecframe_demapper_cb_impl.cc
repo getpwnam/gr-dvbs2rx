@@ -72,6 +72,36 @@ xfecframe_demapper_cb_impl::xfecframe_demapper_cb_impl(dvb_framesize_t framesize
             d_rowaddr1 = rows;
             d_rowaddr2 = rows * 2;
         }
+    } else if (constellation == MOD_16APSK) {
+        float outer_inner_ratio;
+        switch (rate) {
+        case C2_3:
+            outer_inner_ratio = 3.15;
+            break;
+        case C3_4:
+            outer_inner_ratio = 2.85;
+            break;
+        case C4_5:
+            outer_inner_ratio = 2.75;
+            break;
+        case C5_6:
+            outer_inner_ratio = 2.70;
+            break;
+        case C8_9:
+            outer_inner_ratio = 2.60;
+            break;
+        case C9_10:
+            outer_inner_ratio = 2.57;
+            break;
+        default:
+            throw std::runtime_error("Unsupported 16APSK code rate");
+        }
+        d_mod = new AmplitudePhaseShiftKeying<16, gr_complex, int8_t>(outer_inner_ratio);
+        unsigned int rows = d_fecframe_len / d_mod->bits();
+        d_rowaddr0 = 0;
+        d_rowaddr1 = rows;
+        d_rowaddr2 = rows * 2;
+        d_rowaddr3 = rows * 3;
     } else if (constellation == MOD_32APSK) {
         float outer_inner_ratio;
         float middle_inner_ratio;
@@ -199,7 +229,8 @@ int xfecframe_demapper_cb_impl::general_work(int noutput_items,
         }
 
         // Deinterleave
-        if (d_constellation == MOD_8PSK || d_constellation == MOD_32APSK) {
+        if (d_constellation == MOD_8PSK || d_constellation == MOD_16APSK ||
+            d_constellation == MOD_32APSK) {
             int8_t* columns[] = { &out[d_rowaddr0],
                                   &out[d_rowaddr1],
                                   &out[d_rowaddr2],
