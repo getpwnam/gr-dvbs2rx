@@ -9,12 +9,12 @@
 from gnuradio import blocks, dtv, gr, gr_unittest
 
 try:
-    from gnuradio.dvbs2rx import (C3_4, C3_5, C5_6, FECFRAME_NORMAL, FECFRAME_SHORT,
+    from gnuradio.dvbs2rx import (C3_4, C3_5, C4_5, C5_6, FECFRAME_NORMAL, FECFRAME_SHORT,
                                   INFO_OFF, MOD_16APSK, MOD_32APSK, MOD_QPSK, OM_MESSAGE,
                                   STANDARD_DVBS2, bch_decoder_bb,
                                   ldpc_decoder_bb, xfecframe_demapper_cb)
 except ImportError:
-    from python.dvbs2rx import (C3_4, C3_5, C5_6, FECFRAME_NORMAL, FECFRAME_SHORT,
+    from python.dvbs2rx import (C3_4, C3_5, C4_5, C5_6, FECFRAME_NORMAL, FECFRAME_SHORT,
                                 INFO_OFF, MOD_16APSK, MOD_32APSK, MOD_QPSK, OM_MESSAGE,
                                 STANDARD_DVBS2, bch_decoder_bb,
                                 ldpc_decoder_bb, xfecframe_demapper_cb)
@@ -46,6 +46,28 @@ class qa_xfecframe_demapper_cb(gr_unittest.TestCase):
             dtv.INTERPOLATION_OFF)
         demapper = xfecframe_demapper_cb(
             FECFRAME_NORMAL, C5_6, MOD_16APSK)
+        sink = blocks.vector_sink_b()
+
+        self.tb.connect(source, interleaver, modulator, demapper, sink)
+        self.tb.run()
+
+        llrs = sink.data()
+        self.assertEqual(len(llrs), len(bits))
+        self.assertEqual(
+            [(llr >= 128) for llr in llrs],
+            [bool(bit) for bit in bits],
+        )
+
+    def test_16apsk_normal_4_5_reference_round_trip(self):
+        bits = [((index * 73 + index // 7) & 1) for index in range(64800)]
+        source = blocks.vector_source_b(bits, False)
+        interleaver = dtv.dvbs2_interleaver_bb(
+            dtv.FECFRAME_NORMAL, dtv.C4_5, dtv.MOD_16APSK)
+        modulator = dtv.dvbs2_modulator_bc(
+            dtv.FECFRAME_NORMAL, dtv.C4_5, dtv.MOD_16APSK,
+            dtv.INTERPOLATION_OFF)
+        demapper = xfecframe_demapper_cb(
+            FECFRAME_NORMAL, C4_5, MOD_16APSK)
         sink = blocks.vector_sink_b()
 
         self.tb.connect(source, interleaver, modulator, demapper, sink)
@@ -96,6 +118,57 @@ class qa_xfecframe_demapper_cb(gr_unittest.TestCase):
             OM_MESSAGE, INFO_OFF, 25, 0)
         bch_decoder = bch_decoder_bb(
             STANDARD_DVBS2, FECFRAME_NORMAL, C5_6, OM_MESSAGE, 0)
+        decoded_sink = blocks.vector_sink_b()
+        self.tb.connect(
+            llr_source, ldpc_decoder, bch_decoder, decoded_sink)
+        self.tb.run()
+
+        expected = [
+            sum(bits[offset + bit] << (7 - bit) for bit in range(8))
+            for offset in range(0, len(bits), 8)
+        ]
+        self.assertEqual(bch_decoder.get_frame_count(), 32)
+        self.assertEqual(bch_decoder.get_error_count(), 0)
+        self.assertEqual(list(decoded_sink.data()), expected)
+
+    def test_16apsk_normal_4_5_fec_round_trip(self):
+        frame = [
+            ((index * 73 + index // 7) & 1) for index in range(51648)
+        ]
+        bits = frame * 32
+
+        tx_source = blocks.vector_source_b(bits, False)
+        bch_encoder = dtv.dvb_bch_bb(
+            dtv.STANDARD_DVBS2, dtv.FECFRAME_NORMAL, dtv.C4_5)
+        ldpc_encoder = dtv.dvb_ldpc_bb(
+            dtv.STANDARD_DVBS2, dtv.FECFRAME_NORMAL, dtv.C4_5,
+            dtv.MOD_OTHER)
+        encoded_sink = blocks.vector_sink_b()
+        self.tb.connect(
+            tx_source, bch_encoder, ldpc_encoder, encoded_sink)
+        self.tb.run()
+
+        self.tb = gr.top_block()
+        encoded_source = blocks.vector_source_b(encoded_sink.data(), False)
+        interleaver = dtv.dvbs2_interleaver_bb(
+            dtv.FECFRAME_NORMAL, dtv.C4_5, dtv.MOD_16APSK)
+        modulator = dtv.dvbs2_modulator_bc(
+            dtv.FECFRAME_NORMAL, dtv.C4_5, dtv.MOD_16APSK,
+            dtv.INTERPOLATION_OFF)
+        demapper = xfecframe_demapper_cb(
+            FECFRAME_NORMAL, C4_5, MOD_16APSK)
+        llr_sink = blocks.vector_sink_b()
+        self.tb.connect(
+            encoded_source, interleaver, modulator, demapper, llr_sink)
+        self.tb.run()
+
+        self.tb = gr.top_block()
+        llr_source = blocks.vector_source_b(llr_sink.data(), False)
+        ldpc_decoder = ldpc_decoder_bb(
+            STANDARD_DVBS2, FECFRAME_NORMAL, C4_5, MOD_16APSK,
+            OM_MESSAGE, INFO_OFF, 25, 0)
+        bch_decoder = bch_decoder_bb(
+            STANDARD_DVBS2, FECFRAME_NORMAL, C4_5, OM_MESSAGE, 0)
         decoded_sink = blocks.vector_sink_b()
         self.tb.connect(
             llr_source, ldpc_decoder, bch_decoder, decoded_sink)
