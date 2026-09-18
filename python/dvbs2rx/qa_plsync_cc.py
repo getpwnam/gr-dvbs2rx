@@ -26,7 +26,31 @@ EXPJ225 = (-SQRT2_2 - JSQRT2_2)
 EXPJ315 = (+SQRT2_2 - JSQRT2_2)
 
 
-def get_test_plframe(pilots):
+def gold_sequence(gold_code, length):
+    def parity(value, mask):
+        return (value & mask).bit_count() & 1
+
+    x = 0x00001
+    y = 0x3FFFF
+    for _ in range(gold_code):
+        feedback = parity(x, 0x0081)
+        x = (x >> 1) | (feedback << 17)
+
+    sequence = []
+    for _ in range(length):
+        xa = parity(x, 0x8050)
+        xb = parity(x, 0x0081)
+        xc = x & 1
+        x = (x >> 1) | (xb << 17)
+        ya = parity(y, 0x04A1)
+        yb = parity(y, 0xFF60)
+        yc = y & 1
+        y = (y >> 1) | (ya << 17)
+        sequence.append(((xa ^ yb) << 1) + (xc ^ yc))
+    return sequence
+
+
+def get_test_plframe(pilots, gold_code=0):
     """Generate a PLFRAME for testing
 
     Returns one of two PLFRAME options: (modcod=21, short_frame=1, pilots=1),
@@ -73,6 +97,13 @@ def get_test_plframe(pilots):
         plframe = plheader + tuple(np.zeros(16 * 90)) + pilot_blk_1 + \
             tuple(np.zeros(16 * 90)) + pilot_blk_2 + \
             tuple(np.zeros(13 * 90))
+        if gold_code != 0:
+            payload = list(plframe[90:])
+            sequence = gold_sequence(gold_code, len(payload))
+            for block in range(2):
+                start = ((block + 1) * 1476) - 36
+                payload[start:start + 36] = generate_pilot_blk(sequence[start:start + 36])
+            plframe = plheader + tuple(payload)
 
     else:
         # This PLHEADER corresponds to:
@@ -173,6 +204,7 @@ class qa_plsync_cc(gr_unittest.TestCase):
     def setUp(self):
         self.tb = gr.top_block()
         self.gold_code = 0
+        self.tx_gold_code = 0
         self.debug_level = 0
         self.sps = 1.0  # oversampling ratio
         self.freq_est_period = 1
@@ -272,7 +304,7 @@ class qa_plsync_cc(gr_unittest.TestCase):
 
     def _set_test_plframe(self, pilots):
         """Define the PLFRAME to be used for testing"""
-        plframe, modcod, short_frame, slots = get_test_plframe(pilots)
+        plframe, modcod, short_frame, slots = get_test_plframe(pilots, self.tx_gold_code)
         n_pilot_blks = floor(slots / 16) if pilots else 0
         self.frame_len = ((slots + 1) * 90) + (n_pilot_blks * 36)
         self.xfecframe_len = slots * 90
@@ -349,6 +381,20 @@ class qa_plsync_cc(gr_unittest.TestCase):
                           [(self.modcod, self.short_frame),
                            (self.modcod, self.short_frame)],
                           [0, self.xfecframe_len])
+
+    def test_pilot_coherence_ranks_nonzero_gold_code(self):
+        self.tx_gold_code = 37
+        self.gold_code = self.tx_gold_code
+        self._run_flowgraph(2, pilots=True, debug_tags=False)
+        matching_score = self.plsync.get_pilot_coherence()
+
+        self.tb = gr.top_block()
+        self.gold_code = 0
+        self._run_flowgraph(2, pilots=True, debug_tags=False)
+        wrong_score = self.plsync.get_pilot_coherence()
+
+        self.assertGreater(matching_score, 0.99)
+        self.assertLess(wrong_score, 0.5)
 
     def test_detect_noisy_plheader_open_loop(self):
         """Test detection of a noisy modulated PLHEADER in open loop
