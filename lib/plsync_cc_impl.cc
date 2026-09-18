@@ -67,7 +67,9 @@ plsync_cc_impl::plsync_cc_impl(int gold_code,
       d_sof_cnt(0),
       d_frame_cnt(0),
       d_rejected_cnt(0),
-      d_dummy_cnt(0)
+    d_dummy_cnt(0),
+    d_pilot_coherent_sum(0.0),
+    d_pilot_magnitude_sum(0.0)
 {
     // Validate the PLS filters based on their population counts (Hamming weights)
     //
@@ -648,6 +650,19 @@ int plsync_cc_impl::handle_payload(int noutput_items,
     if (d_payload_state != payload_state_t::partial) {
         // Descramble the payload
         d_pl_descrambler->descramble(p_payload, frame_info.pls.payload_len);
+
+        if (frame_info.pls.has_pilots) {
+            for (int i = 0; i < frame_info.pls.n_pilots; i++) {
+                const gr_complex* p_pilots =
+                    p_descrambled_payload + ((i + 1) * PILOT_BLK_PERIOD) - PILOT_BLK_LEN;
+                gr_complex coherent_sum = 0;
+                for (int j = 0; j < PILOT_BLK_LEN; j++) {
+                    coherent_sum += p_pilots[j];
+                    d_pilot_magnitude_sum += std::abs(p_pilots[j]);
+                }
+                d_pilot_coherent_sum += std::abs(coherent_sum);
+            }
+        }
 
         // Update the phase correction based on the PLHEADER phase
         d_phase_corr = gr_expj(-frame_info.plheader_phase);

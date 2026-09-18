@@ -136,6 +136,12 @@ public:
     virtual uint64_t get_dummy_count() = 0;
 
     /*!
+     * \brief Get normalized coherent correlation of descrambled pilot symbols.
+     * \return (float) Correlation in [0, 1], or 0 before any pilots are processed.
+     */
+    virtual float get_pilot_coherence() = 0;
+
+    /*!
      * \brief Get the timestamp of the last frame synchronization lock.
      * \return (std::chrono::system_clock::time_point) Last frame lock timestamp in UTC.
      * \note The timestamp is only valid after the first frame lock.

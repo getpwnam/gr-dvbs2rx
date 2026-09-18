@@ -14,7 +14,7 @@
 /* BINDTOOL_GEN_AUTOMATIC(0)                                                       */
 /* BINDTOOL_USE_PYGCCXML(0)                                                        */
 /* BINDTOOL_HEADER_FILE(plsync_cc.h)                                               */
-/* BINDTOOL_HEADER_FILE_HASH(0a8ef05229dca8050b4fe45a146e00b1)                     */
+/* BINDTOOL_HEADER_FILE_HASH(0bd02665051c0d7b7ea204c3dbf3ac66)                     */
 /***********************************************************************************/
 
 #include <pybind11/chrono.h>
@@ -68,6 +68,8 @@ void bind_plsync_cc(py::module& m)
 
         .def(
             "get_dummy_count", &plsync_cc::get_dummy_count, D(plsync_cc, get_dummy_count))
+
+        .def("get_pilot_coherence", &plsync_cc::get_pilot_coherence)
 
         .def("get_lock_time", &plsync_cc::get_lock_time, D(plsync_cc, get_lock_time))
 

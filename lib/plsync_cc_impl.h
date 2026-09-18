@@ -109,6 +109,8 @@ private:
     uint64_t d_frame_cnt;    /**< Accepted/processed PLFRAMEs */
     uint64_t d_rejected_cnt; /**< Rejected PLFRAMEs */
     uint64_t d_dummy_cnt;    /**< Dummy PLFRAMEs */
+    double d_pilot_coherent_sum;  /**< Coherent sum magnitude over pilot blocks */
+    double d_pilot_magnitude_sum; /**< Sum of pilot symbol magnitudes */
 
     /* Frame metadata from the current PLFRAME (whose payload may be under processing if
      * locked) and from the next PLFRAME (the PLHEADER ahead, processed in advance). */
@@ -296,6 +298,12 @@ public:
     uint64_t get_frame_count() { return d_frame_cnt; }
     uint64_t get_rejected_count() { return d_rejected_cnt; }
     uint64_t get_dummy_count() { return d_dummy_cnt; }
+    float get_pilot_coherence()
+    {
+        return d_pilot_magnitude_sum > 0
+                   ? d_pilot_coherent_sum / d_pilot_magnitude_sum
+                   : 0;
+    }
     std::chrono::system_clock::time_point get_lock_time()
     {
         return d_frame_sync->get_lock_time();
