@@ -68,6 +68,7 @@ bch_decoder_bb_impl::bch_decoder_bb_impl(dvb_standard_t standard,
     d_n_bytes = fec_info.bch.n / 8;
     set_output_multiple(d_k_bytes);
     set_relative_rate((double)fec_info.bch.k / fec_info.bch.n);
+    set_tag_propagation_policy(TPP_CUSTOM);
 }
 
 /*
@@ -91,6 +92,7 @@ int bch_decoder_bb_impl::general_work(int noutput_items,
 
     int consumed = 0;
     int n_codewords = noutput_items / d_k_bytes;
+    const auto status_key = pmt::intern("bch_frame_status");
     for (int i = 0; i < n_codewords; i++) {
         const int corrections = d_codec->decode(in, out);
         if (corrections > 0) {
@@ -106,10 +108,29 @@ int bch_decoder_bb_impl::general_work(int noutput_items,
                 d_frame_cnt,
                 ((double)d_frame_error_cnt / (d_frame_cnt + 1)));
         }
+        auto status = pmt::make_dict();
+        status = pmt::dict_add(
+            status, pmt::intern("frame_index"), pmt::from_uint64(d_frame_cnt));
+        status = pmt::dict_add(
+            status, pmt::intern("valid"), pmt::from_bool(corrections >= 0));
+        add_item_tag(0, nitems_written(0) + uint64_t(i) * d_k_bytes, status_key, status);
         d_frame_cnt++;
         in += d_n_bytes;
         out += d_k_bytes;
         consumed += d_n_bytes;
+    }
+
+    // Replace upstream status tags, preserving other tags and their rate mapping.
+    std::vector<tag_t> tags;
+    get_tags_in_range(tags, 0, nitems_read(0), nitems_read(0) + consumed);
+    for (auto tag : tags) {
+        if (pmt::eq(tag.key, status_key))
+            continue;
+        const auto frame = tag.offset / d_n_bytes;
+        const auto within_frame = tag.offset % d_n_bytes;
+        tag.offset = frame * d_k_bytes +
+                     (within_frame * d_k_bytes + d_n_bytes / 2) / d_n_bytes;
+        add_item_tag(0, tag);
     }
 
     consume_each(consumed);
