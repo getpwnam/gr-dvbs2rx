@@ -610,6 +610,7 @@ void plsync_cc_impl::handle_plheader(uint64_t abs_sof_idx,
     // Save the coarse frequency offset estimate so that we can know the offset affecting
     // each frame. The frequency synchronizer object only tracks the most recent estimate.
     frame_info.coarse_foffset = d_freq_sync->get_coarse_foffset();
+    frame_info.coarse_est_available |= new_coarse_est;
 
     /* Control the frequency correction applied by the external rotator.
      *
@@ -621,7 +622,9 @@ void plsync_cc_impl::handle_plheader(uint64_t abs_sof_idx,
      * correction. The dummy frames are too short, so there is a good chance the
      * correction will arrive late at the rotator message port, i.e., after the rotator
      * has already processed the corresponding index, which we should avoid. */
-    if (d_locked && !frame_info.coarse_corrected && new_coarse_est &&
+    const bool payload_tracking = !frame_info.pls.has_pilots &&
+        frame_info.pls.n_mod == 2 && d_qpsk_payload_tracking;
+    if (d_locked && !payload_tracking && !frame_info.coarse_corrected && new_coarse_est &&
         !frame_info.pls.dummy_frame) {
         control_rotator_freq(abs_sof_idx,
                              frame_info.pls.plframe_len,
@@ -693,6 +696,26 @@ int plsync_cc_impl::handle_payload(int noutput_items,
             }
         }
         frame_info.fine_foffset = new_fine_est ? d_freq_sync->get_fine_foffset() : 0;
+        d_qpsk_payload_tracking = false;
+        if (frame_info.coarse_est_available && !frame_info.pls.has_pilots &&
+            frame_info.pls.n_mod == 2 &&
+            next_frame_info.abs_sof_idx == frame_info.abs_sof_idx + frame_info.pls.plframe_len) {
+            double payload_frequency = 0;
+            if (d_freq_sync->estimate_qpsk_payload_frequency(p_descrambled_payload,
+                                       frame_info.pls.payload_len,
+                                       payload_frequency)) {
+                payload_frequency += 0.25 *
+                    std::round((frame_info.coarse_foffset - payload_frequency) / 0.25);
+                const double phase_cycles =
+                    (next_frame_info.plheader_phase - frame_info.plheader_phase) / (2 * GR_M_PI);
+                const double cycles =
+                    std::round(payload_frequency * frame_info.pls.plframe_len - phase_cycles);
+                frame_info.fine_foffset = (phase_cycles + cycles) / frame_info.pls.plframe_len;
+                frame_info.coarse_corrected = true;
+                new_fine_est = true;
+                d_qpsk_payload_tracking = true;
+            }
+        }
 
         // If there is a new fine frequency offset estimate, update the external rotator
         if (new_fine_est) {
@@ -850,7 +873,19 @@ int plsync_cc_impl::general_work(int noutput_items,
                 // Step the frame synchronizer and keep refreshing the locked state. It
                 // could change any time.
                 bool is_sof = d_frame_sync->step(in[i]);
+                const bool was_locked = d_locked;
                 d_locked = d_frame_sync->is_locked();
+                if (was_locked && !d_locked) {
+                    d_freq_sync->reset();
+                    for (auto* frame : { &d_curr_frame_info, &d_next_frame_info }) {
+                        frame->coarse_est_available = false;
+                        frame->coarse_corrected = false;
+                        frame->coarse_foffset = 0;
+                        frame->fine_foffset = 0;
+                    }
+                }
+                if (!d_locked)
+                    d_qpsk_payload_tracking = false;
                 n_consumed++;
                 if (!is_sof)
                     continue;
@@ -886,6 +921,12 @@ int plsync_cc_impl::general_work(int noutput_items,
                 // cache the `d_next_frame_info` from the previous SOF, which is the
                 // current frame to be processed by the `handle_payload()` function.
                 d_curr_frame_info = d_next_frame_info;
+
+                if (!d_pls_enabled[d_curr_frame_info.pls.plsc] ||
+                    d_curr_frame_info.pls.dummy_frame ||
+                    abs_sof_idx != d_curr_frame_info.abs_sof_idx +
+                                       d_curr_frame_info.pls.plframe_len)
+                    d_qpsk_payload_tracking = false;
 
                 // The PLHEADER can always be processed right away because it doesn't
                 // produce any output (no need to worry about noutput_items). Also, at

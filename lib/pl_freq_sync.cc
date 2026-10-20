@@ -11,6 +11,7 @@
 #include "pi2_bpsk.h"
 #include "pl_defs.h"
 #include "pl_freq_sync.h"
+#include <gnuradio/fft/fft.h>
 #include "pl_signaling.h"
 #include "util.h"
 #include <gnuradio/expj.h>
@@ -88,6 +89,50 @@ freq_sync::freq_sync(unsigned int period, int debug_level)
      * "remove" the modulation of pilot blocks. */
     for (auto& pilot : unmod_pilots)
         pilot = { +SQRT2_2, -SQRT2_2 };
+}
+
+void freq_sync::reset()
+{
+    coarse_foffset = 0;
+    coarse_corrected = false;
+    i_frame = 0;
+    std::fill(pilot_corr.begin(), pilot_corr.end(), 0);
+    fine_foffset = 0;
+    fine_est_ready = false;
+}
+
+bool freq_sync::estimate_qpsk_payload_frequency(const gr_complex* payload,
+                                               unsigned int length,
+                                               double& frequency) const
+{
+    constexpr unsigned int fft_size = 32768;
+    thread_local gr::fft::fft_complex_fwd transform(fft_size);
+    auto* input = transform.get_inbuf();
+    std::fill(input, input + fft_size, gr_complex(0, 0));
+    for (unsigned int index = 0; index < std::min(length, fft_size); ++index) {
+        const float power = std::norm(payload[index]);
+        const gr_complex squared = payload[index] * payload[index] / std::max(power, 1e-20f);
+        input[index] = squared * squared;
+    }
+    transform.execute();
+    const auto* spectrum = transform.get_outbuf();
+    double total = 0;
+    float maximum = 0;
+    int peak = 0;
+    for (unsigned int index = 0; index < fft_size; ++index) {
+        const float power = std::norm(spectrum[index]);
+        total += power;
+        if (power > maximum) {
+            maximum = power;
+            peak = index;
+        }
+    }
+    if (!std::isfinite(total) || total <= 0 || maximum / total < 0.01)
+        return false;
+    if (peak >= static_cast<int>(fft_size / 2))
+        peak -= static_cast<int>(fft_size);
+    frequency = static_cast<double>(peak) / (4 * fft_size);
+    return true;
 }
 
 bool freq_sync::estimate_coarse(const gr_complex* in, bool full, uint8_t plsc)

@@ -139,6 +139,12 @@ private:
                                     unsigned int len);
 
 public:
+    void reset();
+
+    bool estimate_qpsk_payload_frequency(const gr_complex* payload,
+                                         unsigned int length,
+                                         double& frequency) const;
+
     /**
      * \brief Construct the frequency synchronizer object.
      *
