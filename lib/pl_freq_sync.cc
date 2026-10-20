@@ -14,6 +14,7 @@
 #include "pl_signaling.h"
 #include "util.h"
 #include <gnuradio/expj.h>
+#include <gnuradio/fft/fft.h>
 #include <gnuradio/math.h>
 #include <boost/format.hpp>
 #include <cassert>
@@ -88,6 +89,58 @@ freq_sync::freq_sync(unsigned int period, int debug_level)
      * "remove" the modulation of pilot blocks. */
     for (auto& pilot : unmod_pilots)
         pilot = { +SQRT2_2, -SQRT2_2 };
+}
+
+void freq_sync::reset()
+{
+    coarse_foffset = 0;
+    coarse_corrected = false;
+    i_frame = 0;
+    std::fill(pilot_corr.begin(), pilot_corr.end(), 0);
+    fine_foffset = 0;
+    fine_est_ready = false;
+}
+
+bool freq_sync::estimate_psk_payload_frequency(const gr_complex* payload,
+                                               unsigned int length,
+                                               double& frequency,
+                                               unsigned int order) const
+{
+    if (order != 4 && order != 8)
+        return false;
+    constexpr unsigned int fft_size = 32768;
+    thread_local gr::fft::fft_complex_fwd transform(fft_size);
+    auto* input = transform.get_inbuf();
+    std::fill(input, input + fft_size, gr_complex(0, 0));
+    for (unsigned int index = 0; index < std::min(length, fft_size); ++index) {
+        const float power = std::norm(payload[index]);
+        const gr_complex squared =
+            payload[index] * payload[index] / std::max(power, 1e-20f);
+        input[index] = squared * squared;
+        if (order == 8)
+            input[index] *= input[index];
+    }
+    transform.execute();
+    const auto* spectrum = transform.get_outbuf();
+    double total = 0;
+    float maximum = 0;
+    int peak = 0;
+    for (unsigned int index = 0; index < fft_size; ++index) {
+        const float power = std::norm(spectrum[index]);
+        total += power;
+        if (power > maximum) {
+            maximum = power;
+            peak = index;
+        }
+    }
+    // Eighth-power lines are weaker near the 8PSK threshold; preserve the QPSK gate.
+    const double minimum_peak_fraction = order == 8 ? 0.002 : 0.01;
+    if (!std::isfinite(total) || total <= 0 || maximum / total < minimum_peak_fraction)
+        return false;
+    if (peak >= static_cast<int>(fft_size / 2))
+        peak -= static_cast<int>(fft_size);
+    frequency = static_cast<double>(peak) / (order * fft_size);
+    return true;
 }
 
 bool freq_sync::estimate_coarse(const gr_complex* in, bool full, uint8_t plsc)

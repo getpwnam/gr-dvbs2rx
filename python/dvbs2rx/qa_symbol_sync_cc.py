@@ -33,7 +33,9 @@ class qa_plsync_cc(gr_unittest.TestCase):
                           rolloff=0.2,
                           rrc_delay=5,
                           n_subfilt=128,
-                          tag_period=None):
+                          tag_period=None,
+                          source_coords=False,
+                          interp_method=1):
         """Set up the flowgraph
 
         Vector Source -> Symbol Sync -> Vector Sink
@@ -50,12 +52,31 @@ class qa_plsync_cc(gr_unittest.TestCase):
             tag_offset (int): Tag period in samples. Disabled when None.
 
         """
-        interp_method = 1  # test with the linear interpolator for simplicity
-        # TODO: test all other interpolation methods
         src = blocks.vector_source_c(tuple(in_stream))
         symbol_sync = symbol_sync_cc(sps, loop_bw, damping, rolloff, rrc_delay,
                                      n_subfilt, interp_method)
         self.sink = blocks.vector_sink_c()
+        if source_coords:
+
+            class coordinate_sink(gr.sync_block):
+
+                def __init__(self):
+                    gr.sync_block.__init__(self,
+                                           name="coordinate_sink",
+                                           in_sig=[np.float64],
+                                           out_sig=None)
+                    self.values = []
+
+                def work(self, input_items, output_items):
+                    self.values.extend(
+                        float(value) for value in input_items[0])
+                    return len(input_items[0])
+
+            self.coord_sink = coordinate_sink()
+        else:
+            self.coord_sink = None
+        if self.coord_sink is not None:
+            self.tb.connect((symbol_sync, 1), self.coord_sink)
 
         if (tag_period is not None):
             tagger = blocks.stream_to_tagged_stream(gr.sizeof_gr_complex, 1,
@@ -96,6 +117,27 @@ class qa_plsync_cc(gr_unittest.TestCase):
         # synchronizer needs at least two symbols to start.
         self.assertListEqual(x_syms[1:], self.sink.data())
 
+    def test_source_coordinates(self):
+        sps = 2
+        x_up = np.arange(128, dtype=np.complex64)
+        for method, delay in ((1, 0), (2, 1), (3, 1)):
+            with self.subTest(interp_method=method):
+                self.tb = gr.top_block()
+                self._set_up_flowgraph(x_up,
+                                       sps,
+                                       damping=0,
+                                       source_coords=True,
+                                       interp_method=method)
+                self.tb.run()
+
+                expected = [
+                    float(offset - delay)
+                    for offset in range(2, len(x_up), sps)
+                ]
+                self.assertListEqual(expected, self.coord_sink.values)
+                self.assertListEqual([complex(value) for value in expected],
+                                     self.sink.data())
+
     def test_closed_loop_convergence(self):
         """Test whether the loop converges after enough symbols"""
         sps = 2
@@ -129,6 +171,27 @@ class qa_plsync_cc(gr_unittest.TestCase):
         for x in output:
             self.assertAlmostEqual(abs(x.real), 1 / np.sqrt(2), delta=0.02)
             self.assertAlmostEqual(abs(x.imag), 1 / np.sqrt(2), delta=0.02)
+
+    def test_noise_to_signal_transition(self):
+        """Test timing-loop stability across abrupt level transitions"""
+        sps = 2
+        rng = np.random.RandomState(0)
+        noise = 0.01 * rng.choice([-1.0, 1.0], 100)
+        high_level_transition = 4.0 * rng.choice([-1.0, 1.0], 200)
+        signal = np.repeat([(1 + 1j) / np.sqrt(2), (-1 + 1j) / np.sqrt(2),
+                            (-1 - 1j) / np.sqrt(2), (1 - 1j) / np.sqrt(2)], 50)
+        in_stream = np.concatenate((noise, high_level_transition, signal))
+
+        self._set_up_flowgraph(in_stream,
+                               sps=sps,
+                               loop_bw=0.01,
+                               damping=1.0,
+                               rolloff=0.2)
+        self.tb.run()
+
+        output = np.asarray(self.sink.data())
+        self.assertGreater(len(output), 0)
+        self.assertTrue(np.all(np.isfinite(output)))
 
     def test_reference_implementation(self):
         """Test fidelity relative to the reference MATLAB implementation

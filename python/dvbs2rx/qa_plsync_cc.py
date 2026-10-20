@@ -27,8 +27,9 @@ EXPJ315 = (+SQRT2_2 - JSQRT2_2)
 
 
 def gold_sequence(gold_code, length):
+
     def parity(value, mask):
-        return (value & mask).bit_count() & 1
+        return bin(value & mask).count("1") & 1
 
     x = 0x00001
     y = 0x3FFFF
@@ -102,7 +103,8 @@ def get_test_plframe(pilots, gold_code=0):
             sequence = gold_sequence(gold_code, len(payload))
             for block in range(2):
                 start = ((block + 1) * 1476) - 36
-                payload[start:start + 36] = generate_pilot_blk(sequence[start:start + 36])
+                payload[start:start + 36] = generate_pilot_blk(
+                    sequence[start:start + 36])
             plframe = plheader + tuple(payload)
 
     else:
@@ -193,7 +195,7 @@ def rnd_const_mapper_input(n_symbols, bits_per_sym):
         Random input symbols
 
     """
-    rndm = random.Random()
+    rndm = random.Random(0)
     n_bits = int(bits_per_sym * n_symbols)
     in_vec = tuple([rndm.randint(0, 1) for i in range(0, n_bits)])
     return in_vec
@@ -208,6 +210,7 @@ class qa_plsync_cc(gr_unittest.TestCase):
         self.debug_level = 0
         self.sps = 1.0  # oversampling ratio
         self.freq_est_period = 1
+        self.rng = np.random.RandomState(1)
 
     def tearDown(self):
         self.tb = None
@@ -219,7 +222,8 @@ class qa_plsync_cc(gr_unittest.TestCase):
                        rnd_offset=False,
                        closed_loop=False,
                        pilots=False,
-                       debug_tags=True):
+                       debug_tags=True,
+                       source_coordinates=False):
         """Set up and run the flowgraph to completion
 
         Args:
@@ -232,12 +236,15 @@ class qa_plsync_cc(gr_unittest.TestCase):
                 where the PL Sync block controls an external rotator block.
             pilots (bool): Whether to use a test PLFRAME containing pilots.
             debug_tags (bool): Wether to debug the XFECFRAME tags.
+            source_coordinates (bool): Whether to provide source coordinates.
 
         Returns:
             (list) List of tags collected by the Tag Debug block if
             debug_tags=True. None otherwise.
 
         """
+        self.tb = gr.top_block()
+
         # --- PL Sync parameters ---
         acm_vcm = True
         multistream = True
@@ -248,7 +255,7 @@ class qa_plsync_cc(gr_unittest.TestCase):
         self._set_test_plframe(pilots)
         in_syms = replicate_plframes(nframes, self.plframe)
         if (rnd_offset):
-            delay = 2 * np.random.randint(1000)
+            delay = 2 * self.rng.randint(1000)
             in_syms = tuple(np.zeros(delay)) + in_syms
             # NOTE: the delay has to be an even number, otherwise the scheduler
             # may not process all the test samples.
@@ -257,16 +264,46 @@ class qa_plsync_cc(gr_unittest.TestCase):
         # all the PLFRAME IQ samples. That is, if the runner leaves some
         # samples unprocessed, make sure they are zero-padding samples.
         in_syms += tuple(np.zeros(100))
+        if source_coordinates:
+            source_coord_start = 1000.25
+            source_coord_step = 2.0
+            source_coords = tuple(source_coord_start + (source_coord_step * i)
+                                  for i in range(len(in_syms)))
 
         # --- Blocks ---
         src = blocks.vector_source_c(in_syms)
+        if source_coordinates:
+
+            class coordinate_source(gr.sync_block):
+
+                def __init__(self, coordinates):
+                    gr.sync_block.__init__(
+                        self,
+                        name="coordinate_source",
+                        in_sig=None,
+                        out_sig=[np.float64],
+                    )
+                    self.coordinates = coordinates
+                    self.offset = 0
+
+                def work(self, input_items, output_items):
+                    remaining = len(self.coordinates) - self.offset
+                    produced = min(len(output_items[0]), remaining)
+                    if produced == 0:
+                        return -1
+                    output_items[0][:produced] = self.coordinates[
+                        self.offset:self.offset + produced]
+                    self.offset += produced
+                    return produced
+
+            coord_src = coordinate_source(source_coords)
         phase_rot = 2 * pi * freq_offset
         chan_rot = rotator_cc(phase_rot)  # channel rotation
         freq_corr_rot = rotator_cc(0, True)  # frequency correction
         # Restrict the rotator output buffer to reduce the chances of missing
         # the frequency corrections published via message port.
         freq_corr_rot.set_max_output_buffer(1024)
-        noise = analog.noise_source_c(analog.GR_GAUSSIAN, noise_std, 0)
+        noise = analog.noise_source_c(analog.GR_GAUSSIAN, noise_std, 1)
         nadder = blocks.add_cc()
         self.plsync = plsync = plsync_cc(self.gold_code, self.freq_est_period,
                                          self.sps, self.debug_level, acm_vcm,
@@ -295,6 +332,8 @@ class qa_plsync_cc(gr_unittest.TestCase):
             self.tb.connect(nadder, static_agc, freq_corr_rot, plsync, snk)
         else:
             self.tb.connect(nadder, static_agc, plsync, snk)
+        if source_coordinates:
+            self.tb.connect(coord_src, (plsync, 1))
 
         # --- Run ---
         self.tb.run()
@@ -304,7 +343,8 @@ class qa_plsync_cc(gr_unittest.TestCase):
 
     def _set_test_plframe(self, pilots):
         """Define the PLFRAME to be used for testing"""
-        plframe, modcod, short_frame, slots = get_test_plframe(pilots, self.tx_gold_code)
+        plframe, modcod, short_frame, slots = get_test_plframe(
+            pilots, self.tx_gold_code)
         n_pilot_blks = floor(slots / 16) if pilots else 0
         self.frame_len = ((slots + 1) * 90) + (n_pilot_blks * 36)
         self.xfecframe_len = slots * 90
@@ -349,7 +389,16 @@ class qa_plsync_cc(gr_unittest.TestCase):
         self.assertEqual(len(filt_tags), n_expected)
 
         for i, tag in enumerate(filt_tags):
-            if (pmt.is_pair(tag.value)):
+            if pmt.is_dict(tag.value):
+                tag_val = (
+                    pmt.to_double(
+                        pmt.dict_ref(tag.value, pmt.intern("start"),
+                                     pmt.PMT_NIL)),
+                    pmt.to_double(
+                        pmt.dict_ref(tag.value, pmt.intern("end"),
+                                     pmt.PMT_NIL)),
+                )
+            elif pmt.is_pair(tag.value):
                 tag_val = (pmt.to_long(pmt.car(tag.value)),
                            pmt.to_bool(pmt.cdr(tag.value)))
             else:
@@ -388,13 +437,30 @@ class qa_plsync_cc(gr_unittest.TestCase):
         self._run_flowgraph(2, pilots=True, debug_tags=False)
         matching_score = self.plsync.get_pilot_coherence()
 
-        self.tb = gr.top_block()
         self.gold_code = 0
         self._run_flowgraph(2, pilots=True, debug_tags=False)
         wrong_score = self.plsync.get_pilot_coherence()
 
         self.assertGreater(matching_score, 0.99)
         self.assertLess(wrong_score, 0.5)
+
+    def test_source_coordinates(self):
+        """Test PLFRAME source ranges from the optional coordinate input."""
+        nframes = 2
+        source_coord_start = 1000.25
+        source_coord_step = 2.0
+        tags = self._run_flowgraph(nframes, source_coordinates=True)
+        expected_starts = [
+            source_coord_start,
+            source_coord_start + (source_coord_step * self.frame_len),
+        ]
+        expected_ranges = [
+            (expected_starts[0], expected_starts[1]),
+            (expected_starts[1],
+             expected_starts[1] + (source_coord_step * self.frame_len)),
+        ]
+        self._assert_tags(tags, "PLFRAME_SOURCE_RANGE", 2, expected_ranges,
+                          [0, self.xfecframe_len])
 
     def test_detect_noisy_plheader_open_loop(self):
         """Test detection of a noisy modulated PLHEADER in open loop
@@ -405,8 +471,8 @@ class qa_plsync_cc(gr_unittest.TestCase):
 
         The PL Sync block should detect the PLHEADERs and tag the start of the
         corresponding XFECFRAMEs. The random time offset should not change the
-        tag location, as the corresponding zero samples representing the time
-        offset do not reach the output (only the actual XFECFRAMEs are output).
+        tag location: the zero samples representing the time offset do not
+        reach the output (only the actual XFECFRAMEs are output).
 
         """
         snr_db = 5.0  # SNR in dB
@@ -471,7 +537,7 @@ class qa_plsync_cc(gr_unittest.TestCase):
         pack = blocks.repack_bits_bb(1, bits_per_sym, "", False,
                                      gr.GR_MSB_FIRST)
         cmap = digital.chunks_to_symbols_bc(qpsk_const)
-        noise = analog.noise_source_c(analog.GR_GAUSSIAN, noise_std, 0)
+        noise = analog.noise_source_c(analog.GR_GAUSSIAN, noise_std, 1)
         nadder = blocks.add_cc()
         agc = analog.agc_cc(agc_rate, agc_ref, agc_gain)
         agc.set_max_gain(65536)
@@ -501,7 +567,7 @@ class qa_plsync_cc(gr_unittest.TestCase):
         period=1 for the coarse frequency offset estimation.
 
         """
-        fe = np.random.uniform(-.25, .25)  # normalized frequency offset
+        fe = self.rng.uniform(-.25, .25)  # normalized frequency offset
         nframes = 1  # one frame is enough to estimate
         self._run_flowgraph(nframes, freq_offset=fe, debug_tags=False)
         self.assertAlmostEqual(self.plsync.get_freq_offset(), fe)
@@ -512,7 +578,7 @@ class qa_plsync_cc(gr_unittest.TestCase):
         Same as the previous test, but in closed-loop.
 
         """
-        fe = np.random.uniform(-.25, .25)  # normalized frequency offset
+        fe = self.rng.uniform(-.25, .25)  # normalized frequency offset
         nframes = 3
         # Three frames are enough to produce one fine frequency offset
         # estimate. The second PLHEADER is when the frame synchronizer locks,
@@ -534,7 +600,7 @@ class qa_plsync_cc(gr_unittest.TestCase):
         used by the PL Sync block.
 
         """
-        fe = np.random.uniform(-.25, .25)  # normalized frequency offset
+        fe = self.rng.uniform(-.25, .25)  # normalized frequency offset
         nframes = 3  # see the explanation in the previous test
         self._run_flowgraph(nframes,
                             freq_offset=fe,
@@ -554,18 +620,23 @@ class qa_plsync_cc(gr_unittest.TestCase):
 
         """
         nframes = 200
-        self.freq_est_period = 30
+        # Lock loss resets coarse averaging. At low SNR, use a period that
+        # can finish between lock losses rather than requiring 30 frames.
+        self.freq_est_period = 5
         for snr_db in reversed(range(0, 10)):
-            print("Try SNR: %.1f dB" % (snr_db))
-            fe = np.random.uniform(-.25, .25)  # random frequency offset
-            self._run_flowgraph(nframes,
-                                freq_offset=fe,
-                                noise_std=calc_noise_std(snr_db),
-                                closed_loop=True,
-                                pilots=True,
-                                debug_tags=False)
-            # Expect a rough estimate, especially due to the low SNR levels
-            self.assertAlmostEqual(self.plsync.get_freq_offset(), fe, places=2)
+            with self.subTest(snr_db=snr_db):
+                fe = self.rng.uniform(-.25, .25)
+                self._run_flowgraph(nframes,
+                                    freq_offset=fe,
+                                    noise_std=calc_noise_std(snr_db),
+                                    closed_loop=True,
+                                    pilots=True,
+                                    debug_tags=False)
+                self.assertGreater(self.plsync.get_frame_count(), 0)
+                # Expect a rough estimate, especially at low SNR.
+                self.assertAlmostEqual(self.plsync.get_freq_offset(),
+                                       fe,
+                                       places=2)
 
 
 if __name__ == '__main__':

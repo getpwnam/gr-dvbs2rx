@@ -41,3 +41,6 @@ GR_ADD_TEST(qa_plsync_cc ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_pls
 GR_ADD_TEST(qa_rotator_cc ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_rotator_cc.py)
 GR_ADD_TEST(qa_symbol_sync_cc ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_symbol_sync_cc.py)
 GR_ADD_TEST(qa_xfecframe_demapper_cb ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_xfecframe_demapper_cb.py)
+if(ENABLE_DTV_QA)
+    GR_ADD_TEST(qa_dtv_round_trip ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_dtv_round_trip.py)
+endif()

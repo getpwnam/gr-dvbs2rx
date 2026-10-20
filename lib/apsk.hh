@@ -7,13 +7,13 @@
 #define APSK_HH
 
 #include "modulation.hh"
-#include <cstdint>
+#include <type_traits>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
+#include <cstdint>
 #include <limits>
-#include <type_traits>
 
 template <int NUM, typename TYPE, typename CODE>
 struct AmplitudePhaseShiftKeying;
@@ -28,27 +28,19 @@ struct AmplitudePhaseShiftKeying<16, TYPE, CODE> : public Modulation<TYPE, CODE>
 
     explicit AmplitudePhaseShiftKeying(value_type outer_inner_ratio = 2.75)
     {
-        const value_type r2 = std::sqrt(
-            4.0 / (1.0 / (outer_inner_ratio * outer_inner_ratio) + 3.0));
+        const value_type r2 =
+            std::sqrt(4.0 / (1.0 / (outer_inner_ratio * outer_inner_ratio) + 3.0));
         const value_type r1 = r2 / outer_inner_ratio;
         const value_type pi = std::acos(value_type(-1));
 
-        d_points = { std::polar(r2, pi / 4),
-                     std::polar(r2, -pi / 4),
-                     std::polar(r2, 3 * pi / 4),
-                     std::polar(r2, -3 * pi / 4),
-                     std::polar(r2, pi / 12),
-                     std::polar(r2, -pi / 12),
-                     std::polar(r2, 11 * pi / 12),
-                     std::polar(r2, -11 * pi / 12),
-                     std::polar(r2, 5 * pi / 12),
-                     std::polar(r2, -5 * pi / 12),
-                     std::polar(r2, 7 * pi / 12),
-                     std::polar(r2, -7 * pi / 12),
-                     std::polar(r1, pi / 4),
-                     std::polar(r1, -pi / 4),
-                     std::polar(r1, 3 * pi / 4),
-                     std::polar(r1, -3 * pi / 4) };
+        d_points = { std::polar(r2, pi / 4),       std::polar(r2, -pi / 4),
+                     std::polar(r2, 3 * pi / 4),   std::polar(r2, -3 * pi / 4),
+                     std::polar(r2, pi / 12),      std::polar(r2, -pi / 12),
+                     std::polar(r2, 11 * pi / 12), std::polar(r2, -11 * pi / 12),
+                     std::polar(r2, 5 * pi / 12),  std::polar(r2, -5 * pi / 12),
+                     std::polar(r2, 7 * pi / 12),  std::polar(r2, -7 * pi / 12),
+                     std::polar(r1, pi / 4),       std::polar(r1, -pi / 4),
+                     std::polar(r1, 3 * pi / 4),   std::polar(r1, -3 * pi / 4) };
     }
 
     int bits() override { return BITS; }

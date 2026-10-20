@@ -24,16 +24,15 @@ namespace dvbs2rx {
 class ldpc_decoder_bb_impl : public ldpc_decoder_bb
 {
 private:
-    const int d_debug_level;     /**< Debug level for logs */
-    unsigned int d_nldpc;        /**< Codeword length in bits */
-    unsigned int d_nldpc_bytes;  /**< Codeword length in bytes */
-    unsigned int d_kldpc;        /**< Message length in bits */
-    unsigned int d_kldpc_bytes;  /**< Message length in bytes */
-    unsigned int d_output_mode;  /**< Output full codeword or just message */
-    uint64_t d_frame_cnt;        /**< Frame count */
-    uint64_t d_batch_cnt;        /**< Frame batch count */
-    unsigned int d_total_trials; /**< Total LDPC decoding trials */
-    int d_max_trials;            /**< Max decoding trials per frame */
+    const int d_debug_level;    /**< Debug level for logs */
+    unsigned int d_nldpc;       /**< Codeword length in bits */
+    unsigned int d_nldpc_bytes; /**< Codeword length in bytes */
+    unsigned int d_kldpc;       /**< Message length in bits */
+    unsigned int d_kldpc_bytes; /**< Message length in bytes */
+    unsigned int d_output_mode; /**< Output full codeword or just message */
+    uint64_t d_frame_cnt;       /**< Frame count */
+    uint64_t d_total_trials;    /**< Total LDPC decoding trials */
+    int d_max_trials;           /**< Max decoding trials per frame */
     LDPCInterface* d_ldpc;
     int d_simd_size; /**< Number of bytes on the SIMD register */
     int8_t* d_soft;
@@ -60,7 +59,10 @@ public:
                      gr_vector_const_void_star& input_items,
                      gr_vector_void_star& output_items);
 
-    unsigned int get_average_trials() { return d_total_trials / d_batch_cnt; }
+    unsigned int get_average_trials()
+    {
+        return d_frame_cnt == 0 ? 0 : d_total_trials / d_frame_cnt;
+    }
 };
 
 } // namespace dvbs2rx

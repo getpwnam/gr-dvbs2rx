@@ -46,6 +46,7 @@ target_link_libraries(gnuradio-dvbs2rx
     PRIVATE cpu_features
     PUBLIC gnuradio::gnuradio-runtime
     PUBLIC gnuradio::gnuradio-filter
+    PUBLIC gnuradio::gnuradio-fft
   )
 target_include_directories(gnuradio-dvbs2rx
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>

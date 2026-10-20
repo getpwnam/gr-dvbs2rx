@@ -18,6 +18,7 @@
 #include <gnuradio/dvbs2rx/plsync_cc.h>
 #include <volk/volk_alloc.hh>
 #include <array>
+#include <deque>
 #include <queue>
 
 namespace gr {
@@ -65,9 +66,12 @@ struct plframe_info_t {
     float plheader_phase;
     pls_info_t pls;
     bool coarse_corrected = false;
+    bool coarse_est_available = false;
     double coarse_foffset = 0;
     double fine_foffset = 0;
     uint64_t abs_sof_idx = 0;
+    double source_sof_idx = 0;
+    bool source_sof_available = false;
     plframe_info_t() : plheader(PLHEADER_LEN){};
 };
 
@@ -94,7 +98,8 @@ private:
     bool d_plsc_decoder_enabled; /**< Whether the PLSC decoder is enabled */
 
     /* State */
-    bool d_locked;      /**< Whether the frame timing is locked */
+    bool d_locked; /**< Whether the frame timing is locked */
+    bool d_psk_payload_tracking = false;
     bool d_closed_loop; /**< Whether any freq. correction has been applied to the
                            external rotator. False while still waiting for the first
                            correction (i.e., while effectively in open loop) */
@@ -105,12 +110,13 @@ private:
     double d_cum_freq_offset;        /**< Cumulative frequency offset estimate */
 
     /* Frame counts */
-    uint64_t d_sof_cnt;      /**< Total detected SOFs (including false-positives) */
-    uint64_t d_frame_cnt;    /**< Accepted/processed PLFRAMEs */
-    uint64_t d_rejected_cnt; /**< Rejected PLFRAMEs */
-    uint64_t d_dummy_cnt;    /**< Dummy PLFRAMEs */
+    uint64_t d_sof_cnt;           /**< Total detected SOFs (including false-positives) */
+    uint64_t d_frame_cnt;         /**< Accepted/processed PLFRAMEs */
+    uint64_t d_rejected_cnt;      /**< Rejected PLFRAMEs */
+    uint64_t d_dummy_cnt;         /**< Dummy PLFRAMEs */
     double d_pilot_coherent_sum;  /**< Coherent sum magnitude over pilot blocks */
     double d_pilot_magnitude_sum; /**< Sum of pilot symbol magnitudes */
+    std::deque<double> d_source_coord_history; /**< Coordinates ending at PLHEADER tail */
 
     /* Frame metadata from the current PLFRAME (whose payload may be under processing if
      * locked) and from the next PLFRAME (the PLHEADER ahead, processed in advance). */
@@ -235,6 +241,8 @@ private:
      *                   the PLHEADER is decoded.
      */
     void handle_plheader(uint64_t abs_sof_idx,
+                         double source_sof_idx,
+                         bool source_sof_available,
                          const gr_complex* p_plheader,
                          plframe_info_t& frame_info);
 
@@ -300,9 +308,8 @@ public:
     uint64_t get_dummy_count() { return d_dummy_cnt; }
     float get_pilot_coherence()
     {
-        return d_pilot_magnitude_sum > 0
-                   ? d_pilot_coherent_sum / d_pilot_magnitude_sum
-                   : 0;
+        return d_pilot_magnitude_sum > 0 ? d_pilot_coherent_sum / d_pilot_magnitude_sum
+                                         : 0;
     }
     std::chrono::system_clock::time_point get_lock_time()
     {

@@ -46,7 +46,7 @@ gr-dvbs2rx GNU Radio out-of-tree module documentation.
 %setup -q
 
 %build
-%cmake -DNATIVE_OPTIMIZATIONS=OFF -DGR_PYTHON_DIR=%{python3_sitearch}
+%cmake -DNATIVE_OPTIMIZATIONS=OFF -DGR_PYTHON_DIR=%{python3_sitearch} -DENABLE_DTV_QA=OFF
 %cmake_build
 
 %install

@@ -30,9 +30,27 @@ from gnuradio.eng_arg import eng_float, intx
 from gnuradio.fft import window
 from gnuradio.filter import firdes
 
-MAX_RX_GAIN = {'usrp': 75, 'rtl': 50, 'bladeRF': 60, 'plutosdr': 71, 'soapy': 100}
-MAX_FREQ = {'usrp': 6e9, 'rtl': 2.2e9, 'bladeRF': 6e9, 'plutosdr': 6e9, 'soapy': 6e9}
-MIN_FREQ = {'usrp': 10e6, 'rtl': 22e6, 'bladeRF': 47e6, 'plutosdr': 70e6, 'soapy': 0}
+MAX_RX_GAIN = {
+    'usrp': 75,
+    'rtl': 50,
+    'bladeRF': 60,
+    'plutosdr': 71,
+    'soapy': 100
+}
+MAX_FREQ = {
+    'usrp': 6e9,
+    'rtl': 2.2e9,
+    'bladeRF': 6e9,
+    'plutosdr': 6e9,
+    'soapy': 6e9
+}
+MIN_FREQ = {
+    'usrp': 10e6,
+    'rtl': 22e6,
+    'bladeRF': 47e6,
+    'plutosdr': 70e6,
+    'soapy': 0
+}
 
 
 class DVBS2RxTopBlock(gr.top_block, Qt.QWidget):
@@ -539,8 +557,8 @@ class DVBS2RxTopBlock(gr.top_block, Qt.QWidget):
 
             # With the PlutoSDR, show the gain widget only in manual gain mode
             if not ((self.source == 'plutosdr'
-                     and self.plutosdr['gain_mode'] != 'manual')
-                    or (self.source == 'soapy' and self.soapy['agc'])):
+                     and self.plutosdr['gain_mode'] != 'manual') or
+                    (self.source == 'soapy' and self.soapy['agc'])):
                 qt_gain_range = qtgui.Range(0, MAX_RX_GAIN[self.source], 1,
                                             initial_gain, 200)
                 gui_gain_widget = qtgui.RangeWidget(qt_gain_range,
@@ -714,8 +732,7 @@ class DVBS2RxTopBlock(gr.top_block, Qt.QWidget):
                                  self.soapy['freq_correction'])
         self._set_soapy_optional(soapy_source.set_gain_mode, 0,
                                  self.soapy['agc'])
-        self._set_soapy_optional(soapy_source.set_gain, 0,
-                                 self.soapy['gain'])
+        self._set_soapy_optional(soapy_source.set_gain, 0, self.soapy['gain'])
         if not self.soapy['agc']:
             if self.soapy['rf_gain'] is not None:
                 self._set_soapy_optional(soapy_source.set_gain, 0,
@@ -1620,7 +1637,9 @@ def argument_parser():
         '--soapy-device',
         type=str,
         default='driver=remote',
-        help='Full Soapy device string, for example "driver=remote,remote=host:55132"')
+        help=
+        'Full Soapy device string, for example "driver=remote,remote=host:55132"'
+    )
     soapy_group.add_argument('--soapy-dev-args',
                              type=str,
                              default='',
@@ -1653,24 +1672,29 @@ def argument_parser():
                              action='store_true',
                              default=False,
                              help='Enable Soapy automatic gain control')
-    soapy_group.add_argument('--soapy-gain',
-                             type=float,
-                             default=40,
-                             help='Soapy overall gain in dB when AGC is disabled')
-    soapy_group.add_argument('--soapy-rf-gain',
-                             type=float,
-                             help='Soapy named RF gain stage value in dB (driver-dependent)')
-    soapy_group.add_argument('--soapy-rf-gain-name',
-                             type=str,
-                             default='full',
-                             help='Soapy gain element name for --soapy-rf-gain')
-    soapy_group.add_argument('--soapy-if-gain',
-                             type=float,
-                             help='Soapy named IF gain stage value in dB (driver-dependent)')
-    soapy_group.add_argument('--soapy-if-gain-name',
-                             type=str,
-                             default='if',
-                             help='Soapy gain element name for --soapy-if-gain')
+    soapy_group.add_argument(
+        '--soapy-gain',
+        type=float,
+        default=40,
+        help='Soapy overall gain in dB when AGC is disabled')
+    soapy_group.add_argument(
+        '--soapy-rf-gain',
+        type=float,
+        help='Soapy named RF gain stage value in dB (driver-dependent)')
+    soapy_group.add_argument(
+        '--soapy-rf-gain-name',
+        type=str,
+        default='full',
+        help='Soapy gain element name for --soapy-rf-gain')
+    soapy_group.add_argument(
+        '--soapy-if-gain',
+        type=float,
+        help='Soapy named IF gain stage value in dB (driver-dependent)')
+    soapy_group.add_argument(
+        '--soapy-if-gain-name',
+        type=str,
+        default='if',
+        help='Soapy gain element name for --soapy-if-gain')
 
     options = parser.parse_args()
 

@@ -23,7 +23,8 @@ def parse_args() -> argparse.Namespace:
         "output_file",
         type=Path,
         nargs="?",
-        help="Path to destination FC32 binary file (default: <input>_fc32.bin)",
+        help="Path to destination FC32 binary file "
+        "(default: <input>_fc32.bin)",
     )
     parser.add_argument(
         "--scale",
@@ -56,7 +57,8 @@ def main() -> int:
     raw = np.fromfile(in_path, dtype=np.int16)
     if raw.size % 2 != 0:
         raise ValueError(
-            "Input file has odd number of int16 values; expected interleaved I,Q pairs"
+            "Input file has odd number of int16 values; "
+            "expected interleaved I,Q pairs"
         )
 
     iq = raw.reshape(-1, 2).astype(np.float32)

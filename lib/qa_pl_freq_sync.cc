@@ -14,12 +14,121 @@
 #include <gnuradio/expj.h>
 #include <boost/test/data/test_case.hpp>
 #include <boost/test/unit_test.hpp>
+#include <limits>
+#include <random>
 
 namespace bdata = boost::unit_test::data;
 namespace tt = boost::test_tools;
 
 namespace gr {
 namespace dvbs2rx {
+
+BOOST_DATA_TEST_CASE(test_qpsk_payload_frequency,
+                     bdata::make({ 8100, 32400 }) *
+                         bdata::make({ -0.01, -0.0006, -0.00021, 0.0, 0.0006, 0.01 }) *
+                         bdata::make({ 4.1, 8.0, 12.0 }),
+                     length,
+                     offset,
+                     snr)
+{
+    freq_sync synchronizer(20, 0);
+    std::mt19937 generator(902);
+    std::normal_distribution<float> noise(0, std::sqrt(0.5 / std::pow(10.0, snr / 10)));
+    volk::vector<gr_complex> payload(length);
+    for (int index = 0; index < length; ++index) {
+        const auto symbol = gr_expj(M_PI / 4 + (generator() % 4) * M_PI / 2);
+        // Preserve the seeded waveform regardless of argument evaluation order.
+        const float imag_noise = noise(generator);
+        const float real_noise = noise(generator);
+        payload[index] = symbol * gr_expj(2 * M_PI * offset * index) +
+                         gr_complex(real_noise, imag_noise);
+    }
+    double estimate = 0;
+    BOOST_REQUIRE(
+        synchronizer.estimate_psk_payload_frequency(payload.data(), length, estimate));
+    BOOST_CHECK_SMALL(estimate - offset, 1.0 / (4 * (length + 90)));
+}
+
+BOOST_AUTO_TEST_CASE(test_qpsk_payload_frequency_rejects_noise_and_invalid_input)
+{
+    freq_sync synchronizer(20, 0);
+    volk::vector<gr_complex> payload(32400, gr_complex(0, 0));
+    double estimate = 123;
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate));
+    BOOST_CHECK_EQUAL(estimate, 123);
+    std::mt19937 generator(903);
+    std::normal_distribution<float> noise(0, 1);
+    for (auto& symbol : payload) {
+        const float imag_noise = noise(generator);
+        const float real_noise = noise(generator);
+        symbol = gr_complex(real_noise, imag_noise);
+    }
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate));
+    payload[0] = gr_complex(std::numeric_limits<float>::quiet_NaN(), 0);
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate));
+    payload[0] = gr_complex(std::numeric_limits<float>::infinity(), 0);
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate));
+    BOOST_CHECK_EQUAL(estimate, 123);
+}
+
+BOOST_DATA_TEST_CASE(test_8psk_payload_frequency,
+                     bdata::make({ 5400, 21600 }) *
+                         bdata::make({ -0.04, -0.0006, -0.00021, 0.0, 0.0006, 0.04 }) *
+                         bdata::make({ 8.5, 9.0, 12.0 }),
+                     length,
+                     offset,
+                     snr)
+{
+    freq_sync synchronizer(20, 0);
+    std::mt19937 generator(902);
+    std::normal_distribution<float> noise(0, std::sqrt(0.5 / std::pow(10.0, snr / 10)));
+    volk::vector<gr_complex> payload(length);
+    for (int index = 0; index < length; ++index) {
+        const auto symbol = gr_expj((generator() % 8) * M_PI / 4);
+        const float imag_noise = noise(generator);
+        const float real_noise = noise(generator);
+        payload[index] = symbol * gr_expj(2 * M_PI * offset * index) +
+                         gr_complex(real_noise, imag_noise);
+    }
+    double estimate = 0;
+    BOOST_REQUIRE(
+        synchronizer.estimate_psk_payload_frequency(payload.data(), length, estimate, 8));
+    BOOST_CHECK_SMALL(estimate - offset, 1.0 / (4 * (length + 90)));
+}
+
+BOOST_DATA_TEST_CASE(test_8psk_payload_frequency_rejects_noise_and_invalid_input,
+                     bdata::make({ 5400, 21600 }) * bdata::make({ 1, 2, 3, 4, 5 }),
+                     length,
+                     seed)
+{
+    freq_sync synchronizer(20, 0);
+    volk::vector<gr_complex> payload(length, gr_complex(0, 0));
+    double estimate = 123;
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate, 8));
+    std::mt19937 generator(seed);
+    std::normal_distribution<float> noise(0, 1);
+    for (auto& symbol : payload) {
+        const float imag_noise = noise(generator);
+        const float real_noise = noise(generator);
+        symbol = gr_complex(real_noise, imag_noise);
+    }
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate, 8));
+    payload[0] = gr_complex(std::numeric_limits<float>::quiet_NaN(), 0);
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate, 8));
+    payload[0] = gr_complex(std::numeric_limits<float>::infinity(), 0);
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate, 8));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate, 16));
+    BOOST_CHECK_EQUAL(estimate, 123);
+}
 
 /* Add frequency and phase offsets to an input complex symbol buffer */
 void rotate(gr_complex* out,
@@ -56,6 +165,29 @@ struct F {
     freq_sync* p_freq_sync;
     volk::vector<gr_complex> plheader;
 };
+
+BOOST_FIXTURE_TEST_CASE(test_frequency_reset_discards_partial_window, F)
+{
+    for (const double offset : { -0.3, 0.3 }) {
+        freq_sync synchronizer(4, 0);
+        volk::vector<gr_complex> rotated(PLHEADER_LEN);
+        rotate(rotated.data(), plheader.data(), 0.0002, 0, PLHEADER_LEN);
+        for (unsigned int frame = 0; frame < 6; ++frame)
+            BOOST_CHECK_EQUAL(synchronizer.estimate_coarse(rotated.data(), false),
+                              frame == 3);
+        BOOST_REQUIRE(synchronizer.is_coarse_corrected());
+        synchronizer.reset();
+        BOOST_CHECK(!synchronizer.is_coarse_corrected());
+        BOOST_CHECK_EQUAL(synchronizer.get_coarse_foffset(), 0);
+        BOOST_CHECK_EQUAL(synchronizer.get_fine_foffset(), 0);
+        BOOST_CHECK(!synchronizer.has_fine_foffset_est());
+        rotate(rotated.data(), plheader.data(), offset, 0, PLHEADER_LEN);
+        for (unsigned int frame = 0; frame < 4; ++frame)
+            BOOST_CHECK_EQUAL(synchronizer.estimate_coarse(rotated.data(), false),
+                              frame == 3);
+        BOOST_CHECK_SMALL(synchronizer.get_coarse_foffset() - offset, 1e-6);
+    }
+}
 
 
 BOOST_DATA_TEST_CASE_F(F,
