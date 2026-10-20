@@ -101,10 +101,13 @@ void freq_sync::reset()
     fine_est_ready = false;
 }
 
-bool freq_sync::estimate_qpsk_payload_frequency(const gr_complex* payload,
+bool freq_sync::estimate_psk_payload_frequency(const gr_complex* payload,
                                                unsigned int length,
-                                               double& frequency) const
+                                               double& frequency,
+                                               unsigned int order) const
 {
+    if (order != 4 && order != 8)
+        return false;
     constexpr unsigned int fft_size = 32768;
     thread_local gr::fft::fft_complex_fwd transform(fft_size);
     auto* input = transform.get_inbuf();
@@ -113,6 +116,8 @@ bool freq_sync::estimate_qpsk_payload_frequency(const gr_complex* payload,
         const float power = std::norm(payload[index]);
         const gr_complex squared = payload[index] * payload[index] / std::max(power, 1e-20f);
         input[index] = squared * squared;
+        if (order == 8)
+            input[index] *= input[index];
     }
     transform.execute();
     const auto* spectrum = transform.get_outbuf();
@@ -127,11 +132,13 @@ bool freq_sync::estimate_qpsk_payload_frequency(const gr_complex* payload,
             peak = index;
         }
     }
-    if (!std::isfinite(total) || total <= 0 || maximum / total < 0.01)
+    // Eighth-power lines are weaker near the 8PSK threshold; preserve the QPSK gate.
+    const double minimum_peak_fraction = order == 8 ? 0.002 : 0.01;
+    if (!std::isfinite(total) || total <= 0 || maximum / total < minimum_peak_fraction)
         return false;
     if (peak >= static_cast<int>(fft_size / 2))
         peak -= static_cast<int>(fft_size);
-    frequency = static_cast<double>(peak) / (4 * fft_size);
+    frequency = static_cast<double>(peak) / (order * fft_size);
     return true;
 }
 

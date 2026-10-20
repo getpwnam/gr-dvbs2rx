@@ -39,7 +39,7 @@ BOOST_DATA_TEST_CASE(test_qpsk_payload_frequency,
                          gr_complex(noise(generator), noise(generator));
     }
     double estimate = 0;
-    BOOST_REQUIRE(synchronizer.estimate_qpsk_payload_frequency(payload.data(), length, estimate));
+    BOOST_REQUIRE(synchronizer.estimate_psk_payload_frequency(payload.data(), length, estimate));
     BOOST_CHECK_SMALL(estimate - offset, 1.0 / (4 * (length + 90)));
 }
 
@@ -48,17 +48,64 @@ BOOST_AUTO_TEST_CASE(test_qpsk_payload_frequency_rejects_noise_and_invalid_input
     freq_sync synchronizer(20, 0);
     volk::vector<gr_complex> payload(32400, gr_complex(0, 0));
     double estimate = 123;
-    BOOST_CHECK(!synchronizer.estimate_qpsk_payload_frequency(payload.data(), payload.size(), estimate));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(payload.data(), payload.size(), estimate));
     BOOST_CHECK_EQUAL(estimate, 123);
     std::mt19937 generator(903);
     std::normal_distribution<float> noise(0, 1);
     for (auto& symbol : payload)
         symbol = gr_complex(noise(generator), noise(generator));
-    BOOST_CHECK(!synchronizer.estimate_qpsk_payload_frequency(payload.data(), payload.size(), estimate));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(payload.data(), payload.size(), estimate));
     payload[0] = gr_complex(std::numeric_limits<float>::quiet_NaN(), 0);
-    BOOST_CHECK(!synchronizer.estimate_qpsk_payload_frequency(payload.data(), payload.size(), estimate));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(payload.data(), payload.size(), estimate));
     payload[0] = gr_complex(std::numeric_limits<float>::infinity(), 0);
-    BOOST_CHECK(!synchronizer.estimate_qpsk_payload_frequency(payload.data(), payload.size(), estimate));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(payload.data(), payload.size(), estimate));
+    BOOST_CHECK_EQUAL(estimate, 123);
+}
+
+BOOST_DATA_TEST_CASE(test_8psk_payload_frequency,
+                     bdata::make({ 5400, 21600 }) *
+                     bdata::make({ -0.04, -0.0006, -0.00021, 0.0, 0.0006, 0.04 }) *
+                     bdata::make({ 8.5, 9.0, 12.0 }),
+                     length, offset, snr)
+{
+    freq_sync synchronizer(20, 0);
+    std::mt19937 generator(902);
+    std::normal_distribution<float> noise(0, std::sqrt(0.5 / std::pow(10.0, snr / 10)));
+    volk::vector<gr_complex> payload(length);
+    for (int index = 0; index < length; ++index) {
+        const auto symbol = gr_expj((generator() % 8) * M_PI / 4);
+        payload[index] = symbol * gr_expj(2 * M_PI * offset * index) +
+                         gr_complex(noise(generator), noise(generator));
+    }
+    double estimate = 0;
+    BOOST_REQUIRE(
+        synchronizer.estimate_psk_payload_frequency(payload.data(), length, estimate, 8));
+    BOOST_CHECK_SMALL(estimate - offset, 1.0 / (4 * (length + 90)));
+}
+
+BOOST_DATA_TEST_CASE(test_8psk_payload_frequency_rejects_noise_and_invalid_input,
+                     bdata::make({ 5400, 21600 }) * bdata::make({ 1, 2, 3, 4, 5 }),
+                     length, seed)
+{
+    freq_sync synchronizer(20, 0);
+    volk::vector<gr_complex> payload(length, gr_complex(0, 0));
+    double estimate = 123;
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate, 8));
+    std::mt19937 generator(seed);
+    std::normal_distribution<float> noise(0, 1);
+    for (auto& symbol : payload)
+        symbol = gr_complex(noise(generator), noise(generator));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate, 8));
+    payload[0] = gr_complex(std::numeric_limits<float>::quiet_NaN(), 0);
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate, 8));
+    payload[0] = gr_complex(std::numeric_limits<float>::infinity(), 0);
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate, 8));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate, 16));
     BOOST_CHECK_EQUAL(estimate, 123);
 }
 

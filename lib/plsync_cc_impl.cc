@@ -623,7 +623,7 @@ void plsync_cc_impl::handle_plheader(uint64_t abs_sof_idx,
      * correction will arrive late at the rotator message port, i.e., after the rotator
      * has already processed the corresponding index, which we should avoid. */
     const bool payload_tracking = !frame_info.pls.has_pilots &&
-        frame_info.pls.n_mod == 2 && d_qpsk_payload_tracking;
+        (frame_info.pls.n_mod == 2 || frame_info.pls.n_mod == 3) && d_psk_payload_tracking;
     if (d_locked && !payload_tracking && !frame_info.coarse_corrected && new_coarse_est &&
         !frame_info.pls.dummy_frame) {
         control_rotator_freq(abs_sof_idx,
@@ -696,16 +696,19 @@ int plsync_cc_impl::handle_payload(int noutput_items,
             }
         }
         frame_info.fine_foffset = new_fine_est ? d_freq_sync->get_fine_foffset() : 0;
-        d_qpsk_payload_tracking = false;
+        d_psk_payload_tracking = false;
         if (frame_info.coarse_est_available && !frame_info.pls.has_pilots &&
-            frame_info.pls.n_mod == 2 &&
+            (frame_info.pls.n_mod == 2 || frame_info.pls.n_mod == 3) &&
             next_frame_info.abs_sof_idx == frame_info.abs_sof_idx + frame_info.pls.plframe_len) {
             double payload_frequency = 0;
-            if (d_freq_sync->estimate_qpsk_payload_frequency(p_descrambled_payload,
+            const unsigned int order = 1U << frame_info.pls.n_mod;
+            const double ambiguity_period = 1.0 / order;
+            if (d_freq_sync->estimate_psk_payload_frequency(p_descrambled_payload,
                                        frame_info.pls.payload_len,
-                                       payload_frequency)) {
-                payload_frequency += 0.25 *
-                    std::round((frame_info.coarse_foffset - payload_frequency) / 0.25);
+                                       payload_frequency,
+                                       order)) {
+                payload_frequency += ambiguity_period *
+                    std::round((frame_info.coarse_foffset - payload_frequency) / ambiguity_period);
                 const double phase_cycles =
                     (next_frame_info.plheader_phase - frame_info.plheader_phase) / (2 * GR_M_PI);
                 const double cycles =
@@ -713,7 +716,7 @@ int plsync_cc_impl::handle_payload(int noutput_items,
                 frame_info.fine_foffset = (phase_cycles + cycles) / frame_info.pls.plframe_len;
                 frame_info.coarse_corrected = true;
                 new_fine_est = true;
-                d_qpsk_payload_tracking = true;
+                d_psk_payload_tracking = true;
             }
         }
 
@@ -885,7 +888,7 @@ int plsync_cc_impl::general_work(int noutput_items,
                     }
                 }
                 if (!d_locked)
-                    d_qpsk_payload_tracking = false;
+                    d_psk_payload_tracking = false;
                 n_consumed++;
                 if (!is_sof)
                     continue;
@@ -926,7 +929,7 @@ int plsync_cc_impl::general_work(int noutput_items,
                     d_curr_frame_info.pls.dummy_frame ||
                     abs_sof_idx != d_curr_frame_info.abs_sof_idx +
                                        d_curr_frame_info.pls.plframe_len)
-                    d_qpsk_payload_tracking = false;
+                    d_psk_payload_tracking = false;
 
                 // The PLHEADER can always be processed right away because it doesn't
                 // produce any output (no need to worry about noutput_items). Also, at

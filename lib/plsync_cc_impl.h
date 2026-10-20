@@ -96,7 +96,7 @@ private:
 
     /* State */
     bool d_locked;      /**< Whether the frame timing is locked */
-    bool d_qpsk_payload_tracking = false;
+    bool d_psk_payload_tracking = false;
     bool d_closed_loop; /**< Whether any freq. correction has been applied to the
                            external rotator. False while still waiting for the first
                            correction (i.e., while effectively in open loop) */
