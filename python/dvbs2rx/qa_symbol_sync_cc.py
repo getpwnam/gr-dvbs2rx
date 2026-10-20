@@ -130,6 +130,29 @@ class qa_plsync_cc(gr_unittest.TestCase):
             self.assertAlmostEqual(abs(x.real), 1 / np.sqrt(2), delta=0.02)
             self.assertAlmostEqual(abs(x.imag), 1 / np.sqrt(2), delta=0.02)
 
+    def test_noise_to_signal_transition(self):
+        """Test that abrupt level transitions do not destabilize the timing loop"""
+        sps = 2
+        rng = np.random.RandomState(0)
+        noise = 0.01 * rng.choice([-1.0, 1.0], 100)
+        high_level_transition = 4.0 * rng.choice([-1.0, 1.0], 200)
+        signal = np.repeat(
+            [(1 + 1j) / np.sqrt(2), (-1 + 1j) / np.sqrt(2),
+             (-1 - 1j) / np.sqrt(2), (1 - 1j) / np.sqrt(2)],
+            50)
+        in_stream = np.concatenate((noise, high_level_transition, signal))
+
+        self._set_up_flowgraph(in_stream,
+                               sps=sps,
+                               loop_bw=0.01,
+                               damping=1.0,
+                               rolloff=0.2)
+        self.tb.run()
+
+        output = np.asarray(self.sink.data())
+        self.assertGreater(len(output), 0)
+        self.assertTrue(np.all(np.isfinite(output)))
+
     def test_reference_implementation(self):
         """Test fidelity relative to the reference MATLAB implementation
 

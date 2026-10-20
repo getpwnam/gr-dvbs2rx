@@ -8,6 +8,7 @@
  */
 
 #include "symbol_sync_cc_impl.h"
+#include <algorithm>
 #include <gnuradio/filter/firdes.h>
 #include <gnuradio/io_signature.h>
 
@@ -360,18 +361,30 @@ std::pair<int, int> symbol_sync_cc_impl::loop(const gr_complex* in,
         // (when e = 0). Hence, the counter step briefly changes to "(1/L + vp + vi)" on a
         // strobe index and then changes back to "(1/L + vi)" on the remaining indexes.
         // Both counter steps must be taken into account when calculating how many
-        // iterations until the counter underflows again.
-        double W1 = d_nominal_step + pi_out;
+        // iterations until the counter underflows again. A large transition can make
+        // the unconstrained loop steps negative or greater than a complete counter
+        // cycle. Bound both steps so that the loop remains causal and can reacquire.
+        const double max_step_deviation = d_nominal_step * 0.5;
+        const double min_timing_step = d_nominal_step - max_step_deviation;
+        const double max_timing_step =
+            std::min(d_nominal_step + max_step_deviation, std::nextafter(1.0, 0.0));
+        d_vi = std::clamp(d_vi,
+                          min_timing_step - d_nominal_step,
+                          max_timing_step - d_nominal_step);
         double W2 = d_nominal_step + d_vi;
-        assert(W1 > 0);
-        assert(W2 > 0);
-        // NOTE: W1 and W2 can become negative when the loop bandwidth is too wide.
+        double W1 = std::clamp(d_nominal_step + pi_out,
+                               min_timing_step,
+                               max_timing_step);
 
         // Iterations to underflow the modulo-1 counter
         //
         // As noted above, the counter decrements by W1 on the strobe iteration and by W2
         // on the remaining iterations.
-        d_jump = std::floor((d_cnt - W1) / W2) + 2;
+        if (W1 > d_cnt) {
+            d_jump = 1;
+        } else {
+            d_jump = std::floor((d_cnt - W1) / W2) + 2;
+        }
         assert(d_jump > 0);
 
         if (d_jump > 1) {
