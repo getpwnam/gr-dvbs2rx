@@ -48,6 +48,7 @@ jobs:
             git \
             gmp-devel \
             gnuradio-devel \
+            gnuradio-dtv \
             graphviz \
             libsndfile-devel \
             pybind11-devel \

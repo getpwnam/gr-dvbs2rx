@@ -391,10 +391,10 @@ void ldpc_decoder_bb_impl::forecast(int noutput_items,
         const auto input = detail()->input(0);
         gr::thread::scoped_lock guard(*input->mutex());
         if (input->done()) {
-            const int tail_frames = std::max(1, input->items_available() /
-                                                  static_cast<int>(d_nldpc));
-            ninput_items_required[0] =
-                std::min(ninput_items_required[0], tail_frames * static_cast<int>(d_nldpc));
+            const int tail_frames =
+                std::max(1, input->items_available() / static_cast<int>(d_nldpc));
+            ninput_items_required[0] = std::min(ninput_items_required[0],
+                                                tail_frames * static_cast<int>(d_nldpc));
         }
     }
 }
@@ -421,7 +421,7 @@ int ldpc_decoder_bb_impl::general_work(int noutput_items,
         memcpy(d_soft, in + consumed, d_nldpc * batch_frames * sizeof(int8_t));
         std::fill(d_soft + d_nldpc * batch_frames,
                   d_soft + d_nldpc * d_simd_size,
-                  int8_t{127});
+                  int8_t{ 127 });
 
         // LDPC Decoding
         int count = decode(d_aligned_buffer, d_soft, trials);
@@ -438,8 +438,8 @@ int ldpc_decoder_bb_impl::general_work(int noutput_items,
         // Send decoded LLRs so that the XFECFRAME demapper can refine its SNR estimate
         d_pdu_meta = pmt::dict_add(
             d_pdu_meta, pmt::mp("frame_cnt"), pmt::from_uint64(d_frame_cnt));
-        d_pdu_meta = pmt::dict_add(
-            d_pdu_meta, pmt::mp("simd_size"), pmt::from_long(batch_frames));
+        d_pdu_meta =
+            pmt::dict_add(d_pdu_meta, pmt::mp("simd_size"), pmt::from_long(batch_frames));
         message_port_pub(
             d_pdu_port_id,
             pmt::cons(d_pdu_meta,

@@ -8,9 +8,9 @@
  */
 
 #include "symbol_sync_cc_impl.h"
-#include <algorithm>
 #include <gnuradio/filter/firdes.h>
 #include <gnuradio/io_signature.h>
+#include <algorithm>
 
 namespace gr {
 namespace dvbs2rx {
@@ -280,7 +280,8 @@ void symbol_sync_cc_impl::forecast(int noutput_items,
 {
     const int next_strobe_samples = d_jump + (d_init ? 0 : 2);
     ninput_items_required[0] =
-        std::max(static_cast<int>(d_sps * noutput_items), next_strobe_samples) + d_history;
+        std::max(static_cast<int>(d_sps * noutput_items), next_strobe_samples) +
+        d_history;
 }
 
 template <typename Interpolator>
@@ -376,13 +377,10 @@ std::pair<int, int> symbol_sync_cc_impl::loop(const gr_complex* in,
         const double min_timing_step = d_nominal_step - max_step_deviation;
         const double max_timing_step =
             std::min(d_nominal_step + max_step_deviation, std::nextafter(1.0, 0.0));
-        d_vi = std::clamp(d_vi,
-                          min_timing_step - d_nominal_step,
-                          max_timing_step - d_nominal_step);
+        d_vi = std::clamp(
+            d_vi, min_timing_step - d_nominal_step, max_timing_step - d_nominal_step);
         double W2 = d_nominal_step + d_vi;
-        double W1 = std::clamp(d_nominal_step + pi_out,
-                               min_timing_step,
-                               max_timing_step);
+        double W1 = std::clamp(d_nominal_step + pi_out, min_timing_step, max_timing_step);
 
         // Iterations to underflow the modulo-1 counter
         //

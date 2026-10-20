@@ -58,14 +58,19 @@ class qa_plsync_cc(gr_unittest.TestCase):
                                      n_subfilt, interp_method)
         self.sink = blocks.vector_sink_c()
         if source_coords:
+
             class coordinate_sink(gr.sync_block):
+
                 def __init__(self):
-                    gr.sync_block.__init__(
-                        self, name="coordinate_sink", in_sig=[np.float64], out_sig=None)
+                    gr.sync_block.__init__(self,
+                                           name="coordinate_sink",
+                                           in_sig=[np.float64],
+                                           out_sig=None)
                     self.values = []
 
                 def work(self, input_items, output_items):
-                    self.values.extend(float(value) for value in input_items[0])
+                    self.values.extend(
+                        float(value) for value in input_items[0])
                     return len(input_items[0])
 
             self.coord_sink = coordinate_sink()
@@ -118,10 +123,7 @@ class qa_plsync_cc(gr_unittest.TestCase):
         x_syms = [complex(value) for value in range(8)]
         x_up = np.repeat(x_syms, sps)
 
-        self._set_up_flowgraph(x_up,
-                               sps,
-                               damping=0,
-                               source_coords=True)
+        self._set_up_flowgraph(x_up, sps, damping=0, source_coords=True)
         self.tb.run()
 
         self.assertListEqual(
@@ -163,15 +165,13 @@ class qa_plsync_cc(gr_unittest.TestCase):
             self.assertAlmostEqual(abs(x.imag), 1 / np.sqrt(2), delta=0.02)
 
     def test_noise_to_signal_transition(self):
-        """Test that abrupt level transitions do not destabilize the timing loop"""
+        """Test timing-loop stability across abrupt level transitions"""
         sps = 2
         rng = np.random.RandomState(0)
         noise = 0.01 * rng.choice([-1.0, 1.0], 100)
         high_level_transition = 4.0 * rng.choice([-1.0, 1.0], 200)
-        signal = np.repeat(
-            [(1 + 1j) / np.sqrt(2), (-1 + 1j) / np.sqrt(2),
-             (-1 - 1j) / np.sqrt(2), (1 - 1j) / np.sqrt(2)],
-            50)
+        signal = np.repeat([(1 + 1j) / np.sqrt(2), (-1 + 1j) / np.sqrt(2),
+                            (-1 - 1j) / np.sqrt(2), (1 - 1j) / np.sqrt(2)], 50)
         in_stream = np.concatenate((noise, high_level_transition, signal))
 
         self._set_up_flowgraph(in_stream,

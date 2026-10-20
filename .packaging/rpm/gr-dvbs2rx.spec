@@ -13,6 +13,7 @@ BuildRequires:  fftw-devel
 BuildRequires:  g++
 BuildRequires:  gmp-devel
 BuildRequires:  gnuradio-devel >= 3.10
+BuildRequires:  gnuradio-dtv >= 3.10
 BuildRequires:  graphviz
 BuildRequires:  libsndfile-devel
 BuildRequires:  pybind11-devel

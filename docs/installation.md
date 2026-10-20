@@ -20,6 +20,19 @@ Next, test the built binaries by running:
 ctest
 ```
 
+The Python QA tests require SciPy and GNU Radio's `gr-dtv` module, including
+its DVB-S2 transmit blocks. On Fedora, install `python3-scipy` and the separate
+`gnuradio-dtv` package; on Ubuntu/Debian, install `python3-scipy` and `gnuradio`.
+The test helpers support Python 3.8 and later.
+
+CI currently runs the Linux and emulated ARM test jobs. The macOS test job is
+disabled.
+
+The PL synchronization QA uses fixed noise and offset seeds for reproducible
+failures. Its noisy frequency sweep retains the 0-9 dB SNR range and averages
+over five frames: longer averaging windows can be reset by low-SNR lock losses
+before an estimate becomes available.
+
 Finally, install by executing:
 ```
 sudo make install

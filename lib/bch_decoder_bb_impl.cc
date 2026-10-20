@@ -111,8 +111,8 @@ int bch_decoder_bb_impl::general_work(int noutput_items,
         auto status = pmt::make_dict();
         status = pmt::dict_add(
             status, pmt::intern("frame_index"), pmt::from_uint64(d_frame_cnt));
-        status = pmt::dict_add(
-            status, pmt::intern("valid"), pmt::from_bool(corrections >= 0));
+        status =
+            pmt::dict_add(status, pmt::intern("valid"), pmt::from_bool(corrections >= 0));
         add_item_tag(0, nitems_written(0) + uint64_t(i) * d_k_bytes, status_key, status);
         d_frame_cnt++;
         in += d_n_bytes;
@@ -128,8 +128,8 @@ int bch_decoder_bb_impl::general_work(int noutput_items,
             continue;
         const auto frame = tag.offset / d_n_bytes;
         const auto within_frame = tag.offset % d_n_bytes;
-        tag.offset = frame * d_k_bytes +
-                     (within_frame * d_k_bytes + d_n_bytes / 2) / d_n_bytes;
+        tag.offset =
+            frame * d_k_bytes + (within_frame * d_k_bytes + d_n_bytes / 2) / d_n_bytes;
         add_item_tag(0, tag);
     }
 

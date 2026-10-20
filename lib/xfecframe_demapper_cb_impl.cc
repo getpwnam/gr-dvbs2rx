@@ -32,13 +32,13 @@ xfecframe_demapper_cb_impl::xfecframe_demapper_cb_impl(dvb_framesize_t framesize
                 gr::io_signature::make(1, 1, sizeof(int8_t))),
       d_constellation(constellation),
       d_waiting_first_llr(true),
-    d_rowaddr0(0),
-    d_rowaddr1(0),
-    d_rowaddr2(0),
-    d_rowaddr3(0),
-    d_rowaddr4(0),
-    d_frame_cnt(0),
-    d_idx_xfecframe_buffer(0)
+      d_rowaddr0(0),
+      d_rowaddr1(0),
+      d_rowaddr2(0),
+      d_rowaddr3(0),
+      d_rowaddr4(0),
+      d_frame_cnt(0),
+      d_idx_xfecframe_buffer(0)
 {
     if (framesize == FECFRAME_NORMAL)
         d_fecframe_len = FRAME_SIZE_NORMAL;
@@ -129,8 +129,8 @@ xfecframe_demapper_cb_impl::xfecframe_demapper_cb_impl(dvb_framesize_t framesize
         default:
             throw std::runtime_error("Unsupported 32APSK code rate");
         }
-        d_mod = new AmplitudePhaseShiftKeying<32, gr_complex, int8_t>(
-            outer_inner_ratio, middle_inner_ratio);
+        d_mod = new AmplitudePhaseShiftKeying<32, gr_complex, int8_t>(outer_inner_ratio,
+                                                                      middle_inner_ratio);
         unsigned int rows = d_fecframe_len / d_mod->bits();
         d_rowaddr0 = 0;
         d_rowaddr1 = rows;

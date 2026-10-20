@@ -24,15 +24,15 @@ namespace dvbs2rx {
 class ldpc_decoder_bb_impl : public ldpc_decoder_bb
 {
 private:
-    const int d_debug_level;     /**< Debug level for logs */
-    unsigned int d_nldpc;        /**< Codeword length in bits */
-    unsigned int d_nldpc_bytes;  /**< Codeword length in bytes */
-    unsigned int d_kldpc;        /**< Message length in bits */
-    unsigned int d_kldpc_bytes;  /**< Message length in bytes */
-    unsigned int d_output_mode;  /**< Output full codeword or just message */
-    uint64_t d_frame_cnt;        /**< Frame count */
-    uint64_t d_total_trials;     /**< Total LDPC decoding trials */
-    int d_max_trials;            /**< Max decoding trials per frame */
+    const int d_debug_level;    /**< Debug level for logs */
+    unsigned int d_nldpc;       /**< Codeword length in bits */
+    unsigned int d_nldpc_bytes; /**< Codeword length in bytes */
+    unsigned int d_kldpc;       /**< Message length in bits */
+    unsigned int d_kldpc_bytes; /**< Message length in bytes */
+    unsigned int d_output_mode; /**< Output full codeword or just message */
+    uint64_t d_frame_cnt;       /**< Frame count */
+    uint64_t d_total_trials;    /**< Total LDPC decoding trials */
+    int d_max_trials;           /**< Max decoding trials per frame */
     LDPCInterface* d_ldpc;
     int d_simd_size; /**< Number of bytes on the SIMD register */
     int8_t* d_soft;

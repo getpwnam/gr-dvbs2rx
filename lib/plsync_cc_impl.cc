@@ -68,9 +68,9 @@ plsync_cc_impl::plsync_cc_impl(int gold_code,
       d_sof_cnt(0),
       d_frame_cnt(0),
       d_rejected_cnt(0),
-    d_dummy_cnt(0),
-    d_pilot_coherent_sum(0.0),
-    d_pilot_magnitude_sum(0.0)
+      d_dummy_cnt(0),
+      d_pilot_coherent_sum(0.0),
+      d_pilot_magnitude_sum(0.0)
 {
     // Validate the PLS filters based on their population counts (Hamming weights)
     //
@@ -629,8 +629,10 @@ void plsync_cc_impl::handle_plheader(uint64_t abs_sof_idx,
      * correction. The dummy frames are too short, so there is a good chance the
      * correction will arrive late at the rotator message port, i.e., after the rotator
      * has already processed the corresponding index, which we should avoid. */
-    const bool payload_tracking = !frame_info.pls.has_pilots &&
-        (frame_info.pls.n_mod == 2 || frame_info.pls.n_mod == 3) && d_psk_payload_tracking;
+    const bool payload_tracking =
+        !frame_info.pls.has_pilots &&
+        (frame_info.pls.n_mod == 2 || frame_info.pls.n_mod == 3) &&
+        d_psk_payload_tracking;
     if (d_locked && !payload_tracking && !frame_info.coarse_corrected && new_coarse_est &&
         !frame_info.pls.dummy_frame) {
         control_rotator_freq(abs_sof_idx,
@@ -706,21 +708,26 @@ int plsync_cc_impl::handle_payload(int noutput_items,
         d_psk_payload_tracking = false;
         if (frame_info.coarse_est_available && !frame_info.pls.has_pilots &&
             (frame_info.pls.n_mod == 2 || frame_info.pls.n_mod == 3) &&
-            next_frame_info.abs_sof_idx == frame_info.abs_sof_idx + frame_info.pls.plframe_len) {
+            next_frame_info.abs_sof_idx ==
+                frame_info.abs_sof_idx + frame_info.pls.plframe_len) {
             double payload_frequency = 0;
             const unsigned int order = 1U << frame_info.pls.n_mod;
             const double ambiguity_period = 1.0 / order;
             if (d_freq_sync->estimate_psk_payload_frequency(p_descrambled_payload,
-                                       frame_info.pls.payload_len,
-                                       payload_frequency,
-                                       order)) {
-                payload_frequency += ambiguity_period *
-                    std::round((frame_info.coarse_foffset - payload_frequency) / ambiguity_period);
+                                                            frame_info.pls.payload_len,
+                                                            payload_frequency,
+                                                            order)) {
+                payload_frequency +=
+                    ambiguity_period *
+                    std::round((frame_info.coarse_foffset - payload_frequency) /
+                               ambiguity_period);
                 const double phase_cycles =
-                    (next_frame_info.plheader_phase - frame_info.plheader_phase) / (2 * GR_M_PI);
-                const double cycles =
-                    std::round(payload_frequency * frame_info.pls.plframe_len - phase_cycles);
-                frame_info.fine_foffset = (phase_cycles + cycles) / frame_info.pls.plframe_len;
+                    (next_frame_info.plheader_phase - frame_info.plheader_phase) /
+                    (2 * GR_M_PI);
+                const double cycles = std::round(
+                    payload_frequency * frame_info.pls.plframe_len - phase_cycles);
+                frame_info.fine_foffset =
+                    (phase_cycles + cycles) / frame_info.pls.plframe_len;
                 frame_info.coarse_corrected = true;
                 new_fine_est = true;
                 d_psk_payload_tracking = true;
@@ -858,9 +865,9 @@ int plsync_cc_impl::general_work(int noutput_items,
     const gr_complex* in = (const gr_complex*)input_items[0];
     const double* source_coords =
         input_items.size() > 1 ? (const double*)input_items[1] : nullptr;
-    const int ninput_items_available =
-        source_coords == nullptr ? ninput_items[0]
-                                 : std::min(ninput_items[0], ninput_items[1]);
+    const int ninput_items_available = source_coords == nullptr
+                                           ? ninput_items[0]
+                                           : std::min(ninput_items[0], ninput_items[1]);
     gr_complex* out = (gr_complex*)output_items[0];
     int n_produced = 0, n_consumed = 0;
 
@@ -944,8 +951,8 @@ int plsync_cc_impl::general_work(int noutput_items,
 
                 if (!d_pls_enabled[d_curr_frame_info.pls.plsc] ||
                     d_curr_frame_info.pls.dummy_frame ||
-                    abs_sof_idx != d_curr_frame_info.abs_sof_idx +
-                                       d_curr_frame_info.pls.plframe_len)
+                    abs_sof_idx !=
+                        d_curr_frame_info.abs_sof_idx + d_curr_frame_info.pls.plframe_len)
                     d_psk_payload_tracking = false;
 
                 // The PLHEADER can always be processed right away because it doesn't
@@ -1008,17 +1015,16 @@ int plsync_cc_impl::general_work(int noutput_items,
 
                 if (d_curr_frame_info.source_sof_available &&
                     d_next_frame_info.source_sof_available &&
-                    d_next_frame_info.source_sof_idx >
-                        d_curr_frame_info.source_sof_idx) {
+                    d_next_frame_info.source_sof_idx > d_curr_frame_info.source_sof_idx) {
                     pmt::pmt_t range = pmt::make_dict();
-                    range = pmt::dict_add(
-                        range,
-                        pmt::intern("start"),
-                        pmt::from_double(d_curr_frame_info.source_sof_idx));
-                    range = pmt::dict_add(
-                        range,
-                        pmt::intern("end"),
-                        pmt::from_double(d_next_frame_info.source_sof_idx));
+                    range =
+                        pmt::dict_add(range,
+                                      pmt::intern("start"),
+                                      pmt::from_double(d_curr_frame_info.source_sof_idx));
+                    range =
+                        pmt::dict_add(range,
+                                      pmt::intern("end"),
+                                      pmt::from_double(d_next_frame_info.source_sof_idx));
                     add_item_tag(0,
                                  nitems_written(0) + n_produced,
                                  pmt::intern("PLFRAME_SOURCE_RANGE"),

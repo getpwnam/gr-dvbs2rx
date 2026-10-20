@@ -121,11 +121,11 @@ find_package(Boost REQUIRED unit_test_framework)
 # Find OOT test dependencies
 ########################################################################
 execute_process(
-  COMMAND "${PYTHON_EXECUTABLE}" -c "import scipy"
+  COMMAND "${PYTHON_EXECUTABLE}" -c "import scipy; from gnuradio import dtv"
   RESULT_VARIABLE ret
   OUTPUT_QUIET)
-if(ret EQUAL "1")
-  message(FATAL_ERROR "Failed to find Python QA dependencies")
+if(NOT ret EQUAL 0)
+  message(FATAL_ERROR "Python QA requires scipy and GNU Radio gr-dtv")
 endif()
 
 ########################################################################

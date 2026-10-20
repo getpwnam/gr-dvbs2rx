@@ -4,8 +4,8 @@
  */
 
 #include "apsk.hh"
-#include <boost/test/unit_test.hpp>
 #include <gnuradio/gr_complex.h>
+#include <boost/test/unit_test.hpp>
 #include <cmath>
 
 namespace gr {
@@ -58,8 +58,8 @@ BOOST_AUTO_TEST_CASE(test_16apsk_4_5_reference_mapping)
 BOOST_AUTO_TEST_CASE(test_32apsk_3_4_reference_mapping)
 {
     AmplitudePhaseShiftKeying<32, gr_complex, int8_t> apsk(5.27, 2.84);
-    const float r3 = std::sqrt(8.0 / (std::pow(1.0 / 5.27, 2) +
-                                      3.0 * std::pow(2.84 / 5.27, 2) + 4.0));
+    const float r3 =
+        std::sqrt(8.0 / (std::pow(1.0 / 5.27, 2) + 3.0 * std::pow(2.84 / 5.27, 2) + 4.0));
     const float r2 = r3 * 2.84 / 5.27;
     const float r1 = r3 / 5.27;
     const gr_complex expected[] = {

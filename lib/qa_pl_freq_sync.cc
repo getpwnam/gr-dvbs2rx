@@ -25,9 +25,11 @@ namespace dvbs2rx {
 
 BOOST_DATA_TEST_CASE(test_qpsk_payload_frequency,
                      bdata::make({ 8100, 32400 }) *
-                     bdata::make({ -0.01, -0.0006, -0.00021, 0.0, 0.0006, 0.01 }) *
-                     bdata::make({ 4.1, 8.0, 12.0 }),
-                     length, offset, snr)
+                         bdata::make({ -0.01, -0.0006, -0.00021, 0.0, 0.0006, 0.01 }) *
+                         bdata::make({ 4.1, 8.0, 12.0 }),
+                     length,
+                     offset,
+                     snr)
 {
     freq_sync synchronizer(20, 0);
     std::mt19937 generator(902);
@@ -39,7 +41,8 @@ BOOST_DATA_TEST_CASE(test_qpsk_payload_frequency,
                          gr_complex(noise(generator), noise(generator));
     }
     double estimate = 0;
-    BOOST_REQUIRE(synchronizer.estimate_psk_payload_frequency(payload.data(), length, estimate));
+    BOOST_REQUIRE(
+        synchronizer.estimate_psk_payload_frequency(payload.data(), length, estimate));
     BOOST_CHECK_SMALL(estimate - offset, 1.0 / (4 * (length + 90)));
 }
 
@@ -48,25 +51,31 @@ BOOST_AUTO_TEST_CASE(test_qpsk_payload_frequency_rejects_noise_and_invalid_input
     freq_sync synchronizer(20, 0);
     volk::vector<gr_complex> payload(32400, gr_complex(0, 0));
     double estimate = 123;
-    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(payload.data(), payload.size(), estimate));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate));
     BOOST_CHECK_EQUAL(estimate, 123);
     std::mt19937 generator(903);
     std::normal_distribution<float> noise(0, 1);
     for (auto& symbol : payload)
         symbol = gr_complex(noise(generator), noise(generator));
-    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(payload.data(), payload.size(), estimate));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate));
     payload[0] = gr_complex(std::numeric_limits<float>::quiet_NaN(), 0);
-    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(payload.data(), payload.size(), estimate));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate));
     payload[0] = gr_complex(std::numeric_limits<float>::infinity(), 0);
-    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(payload.data(), payload.size(), estimate));
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), payload.size(), estimate));
     BOOST_CHECK_EQUAL(estimate, 123);
 }
 
 BOOST_DATA_TEST_CASE(test_8psk_payload_frequency,
                      bdata::make({ 5400, 21600 }) *
-                     bdata::make({ -0.04, -0.0006, -0.00021, 0.0, 0.0006, 0.04 }) *
-                     bdata::make({ 8.5, 9.0, 12.0 }),
-                     length, offset, snr)
+                         bdata::make({ -0.04, -0.0006, -0.00021, 0.0, 0.0006, 0.04 }) *
+                         bdata::make({ 8.5, 9.0, 12.0 }),
+                     length,
+                     offset,
+                     snr)
 {
     freq_sync synchronizer(20, 0);
     std::mt19937 generator(902);
@@ -85,7 +94,8 @@ BOOST_DATA_TEST_CASE(test_8psk_payload_frequency,
 
 BOOST_DATA_TEST_CASE(test_8psk_payload_frequency_rejects_noise_and_invalid_input,
                      bdata::make({ 5400, 21600 }) * bdata::make({ 1, 2, 3, 4, 5 }),
-                     length, seed)
+                     length,
+                     seed)
 {
     freq_sync synchronizer(20, 0);
     volk::vector<gr_complex> payload(length, gr_complex(0, 0));
@@ -152,7 +162,8 @@ BOOST_FIXTURE_TEST_CASE(test_frequency_reset_discards_partial_window, F)
         volk::vector<gr_complex> rotated(PLHEADER_LEN);
         rotate(rotated.data(), plheader.data(), 0.0002, 0, PLHEADER_LEN);
         for (unsigned int frame = 0; frame < 6; ++frame)
-            BOOST_CHECK_EQUAL(synchronizer.estimate_coarse(rotated.data(), false), frame == 3);
+            BOOST_CHECK_EQUAL(synchronizer.estimate_coarse(rotated.data(), false),
+                              frame == 3);
         BOOST_REQUIRE(synchronizer.is_coarse_corrected());
         synchronizer.reset();
         BOOST_CHECK(!synchronizer.is_coarse_corrected());
@@ -161,7 +172,8 @@ BOOST_FIXTURE_TEST_CASE(test_frequency_reset_discards_partial_window, F)
         BOOST_CHECK(!synchronizer.has_fine_foffset_est());
         rotate(rotated.data(), plheader.data(), offset, 0, PLHEADER_LEN);
         for (unsigned int frame = 0; frame < 4; ++frame)
-            BOOST_CHECK_EQUAL(synchronizer.estimate_coarse(rotated.data(), false), frame == 3);
+            BOOST_CHECK_EQUAL(synchronizer.estimate_coarse(rotated.data(), false),
+                              frame == 3);
         BOOST_CHECK_SMALL(synchronizer.get_coarse_foffset() - offset, 1e-6);
     }
 }

@@ -98,7 +98,7 @@ private:
     bool d_plsc_decoder_enabled; /**< Whether the PLSC decoder is enabled */
 
     /* State */
-    bool d_locked;      /**< Whether the frame timing is locked */
+    bool d_locked; /**< Whether the frame timing is locked */
     bool d_psk_payload_tracking = false;
     bool d_closed_loop; /**< Whether any freq. correction has been applied to the
                            external rotator. False while still waiting for the first
@@ -110,10 +110,10 @@ private:
     double d_cum_freq_offset;        /**< Cumulative frequency offset estimate */
 
     /* Frame counts */
-    uint64_t d_sof_cnt;      /**< Total detected SOFs (including false-positives) */
-    uint64_t d_frame_cnt;    /**< Accepted/processed PLFRAMEs */
-    uint64_t d_rejected_cnt; /**< Rejected PLFRAMEs */
-    uint64_t d_dummy_cnt;    /**< Dummy PLFRAMEs */
+    uint64_t d_sof_cnt;           /**< Total detected SOFs (including false-positives) */
+    uint64_t d_frame_cnt;         /**< Accepted/processed PLFRAMEs */
+    uint64_t d_rejected_cnt;      /**< Rejected PLFRAMEs */
+    uint64_t d_dummy_cnt;         /**< Dummy PLFRAMEs */
     double d_pilot_coherent_sum;  /**< Coherent sum magnitude over pilot blocks */
     double d_pilot_magnitude_sum; /**< Sum of pilot symbol magnitudes */
     std::deque<double> d_source_coord_history; /**< Coordinates ending at PLHEADER tail */
@@ -308,9 +308,8 @@ public:
     uint64_t get_dummy_count() { return d_dummy_cnt; }
     float get_pilot_coherence()
     {
-        return d_pilot_magnitude_sum > 0
-                   ? d_pilot_coherent_sum / d_pilot_magnitude_sum
-                   : 0;
+        return d_pilot_magnitude_sum > 0 ? d_pilot_coherent_sum / d_pilot_magnitude_sum
+                                         : 0;
     }
     std::chrono::system_clock::time_point get_lock_time()
     {

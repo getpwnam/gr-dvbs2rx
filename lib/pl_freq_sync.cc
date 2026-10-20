@@ -11,10 +11,10 @@
 #include "pi2_bpsk.h"
 #include "pl_defs.h"
 #include "pl_freq_sync.h"
-#include <gnuradio/fft/fft.h>
 #include "pl_signaling.h"
 #include "util.h"
 #include <gnuradio/expj.h>
+#include <gnuradio/fft/fft.h>
 #include <gnuradio/math.h>
 #include <boost/format.hpp>
 #include <cassert>
@@ -114,7 +114,8 @@ bool freq_sync::estimate_psk_payload_frequency(const gr_complex* payload,
     std::fill(input, input + fft_size, gr_complex(0, 0));
     for (unsigned int index = 0; index < std::min(length, fft_size); ++index) {
         const float power = std::norm(payload[index]);
-        const gr_complex squared = payload[index] * payload[index] / std::max(power, 1e-20f);
+        const gr_complex squared =
+            payload[index] * payload[index] / std::max(power, 1e-20f);
         input[index] = squared * squared;
         if (order == 8)
             input[index] *= input[index];
