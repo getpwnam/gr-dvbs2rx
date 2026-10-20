@@ -120,12 +120,25 @@ find_package(Boost REQUIRED unit_test_framework)
 ########################################################################
 # Find OOT test dependencies
 ########################################################################
+option(ENABLE_DTV_QA "Run round-trip QA with GNU Radio gr-dtv transmit blocks" ON)
 execute_process(
-  COMMAND "${PYTHON_EXECUTABLE}" -c "import scipy; from gnuradio import dtv"
+  COMMAND "${PYTHON_EXECUTABLE}" -c "import scipy"
   RESULT_VARIABLE ret
   OUTPUT_QUIET)
 if(NOT ret EQUAL 0)
-  message(FATAL_ERROR "Python QA requires scipy and GNU Radio gr-dtv")
+  message(FATAL_ERROR "Python QA requires scipy")
+endif()
+if(ENABLE_DTV_QA)
+  execute_process(
+    COMMAND "${PYTHON_EXECUTABLE}" -c "from gnuradio import dtv"
+    RESULT_VARIABLE dtv_ret
+    OUTPUT_QUIET)
+  if(NOT dtv_ret EQUAL 0)
+    message(FATAL_ERROR
+      "DTV round-trip QA requires GNU Radio gr-dtv. Install gr-dtv or explicitly configure -DENABLE_DTV_QA=OFF for receiver-only QA.")
+  endif()
+else()
+  message(STATUS "DTV round-trip QA explicitly disabled; receiver-only QA remains enabled")
 endif()
 
 ########################################################################

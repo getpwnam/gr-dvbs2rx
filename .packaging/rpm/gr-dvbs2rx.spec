@@ -13,7 +13,6 @@ BuildRequires:  fftw-devel
 BuildRequires:  g++
 BuildRequires:  gmp-devel
 BuildRequires:  gnuradio-devel >= 3.10
-BuildRequires:  gnuradio-dtv >= 3.10
 BuildRequires:  graphviz
 BuildRequires:  libsndfile-devel
 BuildRequires:  pybind11-devel
@@ -47,7 +46,7 @@ gr-dvbs2rx GNU Radio out-of-tree module documentation.
 %setup -q
 
 %build
-%cmake -DNATIVE_OPTIMIZATIONS=OFF -DGR_PYTHON_DIR=%{python3_sitearch}
+%cmake -DNATIVE_OPTIMIZATIONS=OFF -DGR_PYTHON_DIR=%{python3_sitearch} -DENABLE_DTV_QA=OFF
 %cmake_build
 
 %install

@@ -20,13 +20,17 @@ Next, test the built binaries by running:
 ctest
 ```
 
-The Python QA tests require SciPy and GNU Radio's `gr-dtv` module, including
-its DVB-S2 transmit blocks. On Fedora, install `python3-scipy` and the separate
-`gnuradio-dtv` package; on Ubuntu/Debian, install `python3-scipy` and `gnuradio`.
+The Python QA tests require SciPy. The additional DTV round-trip tests require
+GNU Radio's `gr-dtv` module, including its DVB-S2 transmit blocks. On
+Ubuntu/Debian, install `python3-scipy` and `gnuradio`. The Fedora 38 GNU Radio
+package used by CI does not include `gr-dtv`; configure
+`-DENABLE_DTV_QA=OFF` to run receiver-only QA there. There is no separate
+`gnuradio-dtv` package in that Fedora environment.
 The test helpers support Python 3.8 and later.
 
-CI currently runs the Linux and emulated ARM test jobs. The macOS test job is
-disabled.
+CI runs receiver-only QA on Fedora and requires the DTV round-trip tests on
+Ubuntu and emulated ARM. RPM builds also select receiver-only QA. The macOS
+test job is disabled.
 
 The PL synchronization QA uses fixed noise and offset seeds for reproducible
 failures. Its noisy frequency sweep retains the 0-9 dB SNR range and averages
@@ -57,6 +61,8 @@ When compiling from source, the CMake build can be customized by the following o
 - `BENCHMARK_FEC`: when set to ON, builds an application to assess the performance of various forward error correction (FEC) configurations. The current implementation focuses on the PLSC decoder and yields the `bench_plsc` application at the `bench/fec/` subdirectory of the build directory. This option requires the [AFF3CT library](http://aff3ct.github.io) (version 3.0.0 or later).
 
 - `DEBUG_LOGS`: when set to OFF, disables the low-level logs available by default to debug the physical layer operation.
+
+- `ENABLE_DTV_QA`: when set to ON (default), requires GNU Radio's `gr-dtv` module and registers the additional `qa_dtv_round_trip` integration test. Missing DTV support is a configuration error, not an automatic skip. Set to OFF explicitly for receiver-only QA, including Fedora 38's packaged GNU Radio. The receiver demapper tests still run.
 
 - `NATIVE_OPTIMIZATIONS`: when set to ON (default), compiles the dvbs2rx library using the `-march=native` flag to enable optimizations for the local CPU. Use this option to obtain improved CPU performance, as long as your goal is to run the project on the same machine used for compilation. Set this option to OFF if compiling binaries to run on other CPUs.
 
