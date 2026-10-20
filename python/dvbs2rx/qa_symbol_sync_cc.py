@@ -34,7 +34,8 @@ class qa_plsync_cc(gr_unittest.TestCase):
                           rrc_delay=5,
                           n_subfilt=128,
                           tag_period=None,
-                          source_coords=False):
+                          source_coords=False,
+                          interp_method=1):
         """Set up the flowgraph
 
         Vector Source -> Symbol Sync -> Vector Sink
@@ -51,8 +52,6 @@ class qa_plsync_cc(gr_unittest.TestCase):
             tag_offset (int): Tag period in samples. Disabled when None.
 
         """
-        interp_method = 1  # test with the linear interpolator for simplicity
-        # TODO: test all other interpolation methods
         src = blocks.vector_source_c(tuple(in_stream))
         symbol_sync = symbol_sync_cc(sps, loop_bw, damping, rolloff, rrc_delay,
                                      n_subfilt, interp_method)
@@ -120,15 +119,24 @@ class qa_plsync_cc(gr_unittest.TestCase):
 
     def test_source_coordinates(self):
         sps = 2
-        x_syms = [complex(value) for value in range(8)]
-        x_up = np.repeat(x_syms, sps)
+        x_up = np.arange(128, dtype=np.complex64)
+        for method, delay in ((1, 0), (2, 1), (3, 1)):
+            with self.subTest(interp_method=method):
+                self.tb = gr.top_block()
+                self._set_up_flowgraph(x_up,
+                                       sps,
+                                       damping=0,
+                                       source_coords=True,
+                                       interp_method=method)
+                self.tb.run()
 
-        self._set_up_flowgraph(x_up, sps, damping=0, source_coords=True)
-        self.tb.run()
-
-        self.assertListEqual(
-            [float(offset) for offset in range(2, len(x_up), sps)],
-            self.coord_sink.values)
+                expected = [
+                    float(offset - delay)
+                    for offset in range(2, len(x_up), sps)
+                ]
+                self.assertListEqual(expected, self.coord_sink.values)
+                self.assertListEqual([complex(value) for value in expected],
+                                     self.sink.data())
 
     def test_closed_loop_convergence(self):
         """Test whether the loop converges after enough symbols"""

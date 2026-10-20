@@ -6,20 +6,24 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
+from math import pi
+
+import numpy as np
+import pmt
 from gnuradio import blocks, dtv, gr, gr_unittest
 
 try:
     from gnuradio.dvbs2rx import (C3_4, C4_5, C5_6, FECFRAME_NORMAL,
                                   FECFRAME_SHORT, INFO_OFF, MOD_16APSK,
                                   MOD_32APSK, OM_MESSAGE, STANDARD_DVBS2,
-                                  bch_decoder_bb, ldpc_decoder_bb,
-                                  xfecframe_demapper_cb)
+                                  bch_decoder_bb, ldpc_decoder_bb, plsync_cc,
+                                  rotator_cc, xfecframe_demapper_cb)
 except ImportError:
     from python.dvbs2rx import (C3_4, C4_5, C5_6, FECFRAME_NORMAL,
                                 FECFRAME_SHORT, INFO_OFF, MOD_16APSK,
                                 MOD_32APSK, OM_MESSAGE, STANDARD_DVBS2,
-                                bch_decoder_bb, ldpc_decoder_bb,
-                                xfecframe_demapper_cb)
+                                bch_decoder_bb, ldpc_decoder_bb, plsync_cc,
+                                rotator_cc, xfecframe_demapper_cb)
 
 
 class qa_dtv_round_trip(gr_unittest.TestCase):
@@ -29,6 +33,63 @@ class qa_dtv_round_trip(gr_unittest.TestCase):
 
     def tearDown(self):
         self.tb = None
+
+    def test_pilotless_carrier_rotator_transitions(self):
+        for order, constellation, rate, modcod in (
+            (4, dtv.MOD_QPSK, dtv.C1_2, 4),
+            (8, dtv.MOD_8PSK, dtv.C3_5, 12),
+        ):
+            for offset in (-0.18, 0.18):
+                with self.subTest(order=order, offset=offset):
+                    self.tb = gr.top_block()
+                    length = 16200 // int(np.log2(order))
+                    rng = np.random.RandomState(42)
+                    payload = np.exp(2j * pi *
+                                     rng.randint(order, size=length) / order)
+                    source = blocks.vector_source_c(tuple(payload) * 24)
+                    framer = dtv.dvbs2_physical_cc(dtv.FECFRAME_SHORT, rate,
+                                                   constellation,
+                                                   dtv.PILOTS_OFF, 0)
+                    symbols = blocks.keep_m_in_n(gr.sizeof_gr_complex, 1, 2, 0)
+                    channel = rotator_cc(2 * pi * offset)
+                    correction = rotator_cc(0, True)
+                    correction.set_max_output_buffer(1024)
+                    pls = (modcod << 2) | 2
+                    sync = plsync_cc(0, 4, 1.0, 0, False, False, 1 << pls, 0)
+                    sink = blocks.vector_sink_c()
+                    applied = blocks.vector_sink_c()
+                    feedback = blocks.message_debug()
+                    self.tb.connect(source, framer, symbols, channel,
+                                    correction, sync, sink)
+                    self.tb.connect(correction, applied)
+                    self.tb.msg_connect((sync, 'rotator_phase_inc'),
+                                        (correction, 'cmd'))
+                    self.tb.msg_connect((sync, 'rotator_phase_inc'),
+                                        (feedback, 'store'))
+                    self.tb.run()
+
+                    self.assertGreater(sync.get_frame_count(), 12)
+                    self.assertGreater(feedback.num_messages(), 2)
+                    applied_tags = [
+                        tag for tag in applied.tags()
+                        if pmt.eq(tag.key, pmt.intern("rot_phase_inc"))
+                    ]
+                    self.assertGreater(len(applied_tags), 0)
+                    for index in range(feedback.num_messages()):
+                        message = feedback.get_message(index)
+                        increment = pmt.to_double(
+                            pmt.dict_ref(message, pmt.intern("inc"),
+                                         pmt.PMT_NIL))
+                        self.assertAlmostEqual(-increment / (2 * pi),
+                                               offset,
+                                               delta=1e-4)
+                    self.assertAlmostEqual(sync.get_freq_offset(),
+                                           offset,
+                                           delta=1e-4)
+                    corrected = np.asarray(sink.data()[-length:])
+                    residual = corrected / payload
+                    phase_steps = np.angle(residual[1:] * residual[:-1].conj())
+                    self.assertLess(np.max(np.abs(phase_steps)), 1e-3)
 
     def test_16apsk_normal_5_6_reference_round_trip(self):
         bits = [((index * 73 + index // 7) & 1) for index in range(64800)]

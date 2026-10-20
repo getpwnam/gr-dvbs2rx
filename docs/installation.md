@@ -37,6 +37,12 @@ failures. Its noisy frequency sweep retains the 0-9 dB SNR range and averages
 over five frames: longer averaging windows can be reset by low-SNR lock losses
 before an estimate becomes available.
 
+Carrier-transition QA exercises pilotless QPSK and 8PSK with multi-frame coarse
+averaging. Confirmed rotator-frequency changes invalidate cached coarse
+estimates and restart partial averaging windows before selecting payload
+frequency aliases. Source-coordinate QA covers linear, quadratic, and cubic
+interpolation, including the one-input-sample delay of the two Farrow methods.
+
 Finally, install by executing:
 ```
 sudo make install

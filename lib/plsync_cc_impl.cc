@@ -512,7 +512,18 @@ void plsync_cc_impl::handle_plheader(uint64_t abs_sof_idx,
      * NOTE: this function is executed first because it updates the d_closed_loop state,
      * which is required below on the `derotate_plheader()` call.
      **/
+    const double previous_rot_freq = d_rot_ctrl.current.freq;
     calibrate_tag_delay(abs_sof_idx);
+    if (d_rot_ctrl.current.freq != previous_rot_freq) {
+        // A tagged correction changes the reference of both cached estimates and
+        // partial averaging windows. The preceding payload retains its own cache.
+        d_freq_sync->reset();
+        frame_info.coarse_est_available = false;
+        frame_info.coarse_corrected = false;
+        frame_info.coarse_foffset = 0;
+        frame_info.fine_foffset = 0;
+        d_psk_payload_tracking = false;
+    }
 
     /* Coarse frequency offset estimation
      *

@@ -341,7 +341,7 @@ std::pair<int, int> symbol_sync_cc_impl::loop(const gr_complex* in,
         const double filter_delay =
             d_interp_method == interp_method_t::POLYPHASE
                 ? static_cast<double>(d_poly_interp.get_subfilt_delay() - 1)
-                : 0.0;
+                : (d_interp_method == interp_method_t::LINEAR ? 0.0 : 1.0);
         d_strobe_coords[k] = m_k + d_mu - filter_delay;
         // NOTE: define the strobe index as the basepoint index, following the definition
         // on Michael Rice's book. If we wanted to define the strobe index as the closest
