@@ -18,6 +18,7 @@
 #include <gnuradio/dvbs2rx/plsync_cc.h>
 #include <volk/volk_alloc.hh>
 #include <array>
+#include <deque>
 #include <queue>
 
 namespace gr {
@@ -69,6 +70,8 @@ struct plframe_info_t {
     double coarse_foffset = 0;
     double fine_foffset = 0;
     uint64_t abs_sof_idx = 0;
+    double source_sof_idx = 0;
+    bool source_sof_available = false;
     plframe_info_t() : plheader(PLHEADER_LEN){};
 };
 
@@ -113,6 +116,7 @@ private:
     uint64_t d_dummy_cnt;    /**< Dummy PLFRAMEs */
     double d_pilot_coherent_sum;  /**< Coherent sum magnitude over pilot blocks */
     double d_pilot_magnitude_sum; /**< Sum of pilot symbol magnitudes */
+    std::deque<double> d_source_coord_history; /**< Coordinates ending at PLHEADER tail */
 
     /* Frame metadata from the current PLFRAME (whose payload may be under processing if
      * locked) and from the next PLFRAME (the PLHEADER ahead, processed in advance). */
@@ -237,6 +241,8 @@ private:
      *                   the PLHEADER is decoded.
      */
     void handle_plheader(uint64_t abs_sof_idx,
+                         double source_sof_idx,
+                         bool source_sof_available,
                          const gr_complex* p_plheader,
                          plframe_info_t& frame_info);
 

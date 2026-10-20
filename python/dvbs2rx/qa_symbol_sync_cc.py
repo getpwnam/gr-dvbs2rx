@@ -33,7 +33,8 @@ class qa_plsync_cc(gr_unittest.TestCase):
                           rolloff=0.2,
                           rrc_delay=5,
                           n_subfilt=128,
-                          tag_period=None):
+                          tag_period=None,
+                          source_coords=False):
         """Set up the flowgraph
 
         Vector Source -> Symbol Sync -> Vector Sink
@@ -56,6 +57,22 @@ class qa_plsync_cc(gr_unittest.TestCase):
         symbol_sync = symbol_sync_cc(sps, loop_bw, damping, rolloff, rrc_delay,
                                      n_subfilt, interp_method)
         self.sink = blocks.vector_sink_c()
+        if source_coords:
+            class coordinate_sink(gr.sync_block):
+                def __init__(self):
+                    gr.sync_block.__init__(
+                        self, name="coordinate_sink", in_sig=[np.float64], out_sig=None)
+                    self.values = []
+
+                def work(self, input_items, output_items):
+                    self.values.extend(float(value) for value in input_items[0])
+                    return len(input_items[0])
+
+            self.coord_sink = coordinate_sink()
+        else:
+            self.coord_sink = None
+        if self.coord_sink is not None:
+            self.tb.connect((symbol_sync, 1), self.coord_sink)
 
         if (tag_period is not None):
             tagger = blocks.stream_to_tagged_stream(gr.sizeof_gr_complex, 1,
@@ -95,6 +112,21 @@ class qa_plsync_cc(gr_unittest.TestCase):
         # All symbols should be retained, except the first, since the symbol
         # synchronizer needs at least two symbols to start.
         self.assertListEqual(x_syms[1:], self.sink.data())
+
+    def test_source_coordinates(self):
+        sps = 2
+        x_syms = [complex(value) for value in range(8)]
+        x_up = np.repeat(x_syms, sps)
+
+        self._set_up_flowgraph(x_up,
+                               sps,
+                               damping=0,
+                               source_coords=True)
+        self.tb.run()
+
+        self.assertListEqual(
+            [float(offset) for offset in range(2, len(x_up), sps)],
+            self.coord_sink.values)
 
     def test_closed_loop_convergence(self):
         """Test whether the loop converges after enough symbols"""

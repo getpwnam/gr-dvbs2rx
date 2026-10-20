@@ -211,7 +211,8 @@ symbol_sync_cc_impl::symbol_sync_cc_impl(float sps,
                                          interp_method_t interp_method)
     : gr::block("symbol_sync_cc",
                 gr::io_signature::make(1, 1, sizeof(gr_complex)),
-                gr::io_signature::make(1, 1, sizeof(gr_complex))),
+                gr::io_signature::makev(
+                    1, 2, std::vector<int>{ sizeof(gr_complex), sizeof(double) })),
       d_sps(sps),
       d_midpoint(sps / 2),
       d_K1(-1), // assume -1 means uninitialized for K1, K2, and Kp
@@ -291,6 +292,8 @@ std::pair<int, int> symbol_sync_cc_impl::loop(const gr_complex* in,
 {
     if (noutput_items > static_cast<int>(d_strobe_idx.size()))
         d_strobe_idx.resize(noutput_items);
+    if (noutput_items > static_cast<int>(d_strobe_coords.size()))
+        d_strobe_coords.resize(noutput_items);
 
     // Starting input index
     //
@@ -334,6 +337,11 @@ std::pair<int, int> symbol_sync_cc_impl::loop(const gr_complex* in,
         n += d_jump;
         int m_k = n - 1;       // basepoint index
         d_strobe_idx[k] = m_k; // save the strobe index to use later when placing tags
+        const double filter_delay =
+            d_interp_method == interp_method_t::POLYPHASE
+                ? static_cast<double>(d_poly_interp.get_subfilt_delay() - 1)
+                : 0.0;
+        d_strobe_coords[k] = m_k + d_mu - filter_delay;
         // NOTE: define the strobe index as the basepoint index, following the definition
         // on Michael Rice's book. If we wanted to define the strobe index as the closest
         // sample index relative to the output interpolant, we could set it equal to the
@@ -463,6 +471,11 @@ int symbol_sync_cc_impl::general_work(int noutput_items,
     const unsigned int output_port = 0;
     const uint64_t n_read = nitems_read(input_port);
     const uint64_t n_written = nitems_written(output_port);
+    if (output_items.size() > 1) {
+        double* coords = reinterpret_cast<double*>(output_items[1]);
+        for (int i = 0; i < k; i++)
+            coords[i] = n_read + d_strobe_coords[i] - d_history;
+    }
     std::vector<tag_t> tags;
     get_tags_in_range(tags, input_port, n_read, n_read + n_consumed);
     tags.insert(tags.begin(), d_pending_tags.begin(), d_pending_tags.end());

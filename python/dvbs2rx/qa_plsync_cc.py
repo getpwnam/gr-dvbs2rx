@@ -219,7 +219,8 @@ class qa_plsync_cc(gr_unittest.TestCase):
                        rnd_offset=False,
                        closed_loop=False,
                        pilots=False,
-                       debug_tags=True):
+                       debug_tags=True,
+                       source_coordinates=False):
         """Set up and run the flowgraph to completion
 
         Args:
@@ -232,6 +233,7 @@ class qa_plsync_cc(gr_unittest.TestCase):
                 where the PL Sync block controls an external rotator block.
             pilots (bool): Whether to use a test PLFRAME containing pilots.
             debug_tags (bool): Wether to debug the XFECFRAME tags.
+            source_coordinates (bool): Whether to provide source coordinates.
 
         Returns:
             (list) List of tags collected by the Tag Debug block if
@@ -257,9 +259,38 @@ class qa_plsync_cc(gr_unittest.TestCase):
         # all the PLFRAME IQ samples. That is, if the runner leaves some
         # samples unprocessed, make sure they are zero-padding samples.
         in_syms += tuple(np.zeros(100))
+        if source_coordinates:
+            source_coord_start = 1000.25
+            source_coord_step = 2.0
+            source_coords = tuple(source_coord_start +
+                                  (source_coord_step * i)
+                                  for i in range(len(in_syms)))
 
         # --- Blocks ---
         src = blocks.vector_source_c(in_syms)
+        if source_coordinates:
+            class coordinate_source(gr.sync_block):
+                def __init__(self, coordinates):
+                    gr.sync_block.__init__(
+                        self,
+                        name="coordinate_source",
+                        in_sig=None,
+                        out_sig=[np.float64],
+                    )
+                    self.coordinates = coordinates
+                    self.offset = 0
+
+                def work(self, input_items, output_items):
+                    remaining = len(self.coordinates) - self.offset
+                    produced = min(len(output_items[0]), remaining)
+                    if produced == 0:
+                        return -1
+                    output_items[0][:produced] = self.coordinates[
+                        self.offset:self.offset + produced]
+                    self.offset += produced
+                    return produced
+
+            coord_src = coordinate_source(source_coords)
         phase_rot = 2 * pi * freq_offset
         chan_rot = rotator_cc(phase_rot)  # channel rotation
         freq_corr_rot = rotator_cc(0, True)  # frequency correction
@@ -295,6 +326,8 @@ class qa_plsync_cc(gr_unittest.TestCase):
             self.tb.connect(nadder, static_agc, freq_corr_rot, plsync, snk)
         else:
             self.tb.connect(nadder, static_agc, plsync, snk)
+        if source_coordinates:
+            self.tb.connect(coord_src, (plsync, 1))
 
         # --- Run ---
         self.tb.run()
@@ -349,7 +382,14 @@ class qa_plsync_cc(gr_unittest.TestCase):
         self.assertEqual(len(filt_tags), n_expected)
 
         for i, tag in enumerate(filt_tags):
-            if (pmt.is_pair(tag.value)):
+            if pmt.is_dict(tag.value):
+                tag_val = (
+                    pmt.to_double(pmt.dict_ref(
+                        tag.value, pmt.intern("start"), pmt.PMT_NIL)),
+                    pmt.to_double(pmt.dict_ref(
+                        tag.value, pmt.intern("end"), pmt.PMT_NIL)),
+                )
+            elif pmt.is_pair(tag.value):
                 tag_val = (pmt.to_long(pmt.car(tag.value)),
                            pmt.to_bool(pmt.cdr(tag.value)))
             else:
@@ -395,6 +435,25 @@ class qa_plsync_cc(gr_unittest.TestCase):
 
         self.assertGreater(matching_score, 0.99)
         self.assertLess(wrong_score, 0.5)
+
+    def test_source_coordinates(self):
+        """Test PLFRAME source range tags from the optional coordinate input."""
+        nframes = 2
+        source_coord_start = 1000.25
+        source_coord_step = 2.0
+        tags = self._run_flowgraph(nframes, source_coordinates=True)
+        expected_starts = [
+            source_coord_start,
+            source_coord_start + (source_coord_step * self.frame_len),
+        ]
+        expected_ranges = [
+            (expected_starts[0], expected_starts[1]),
+            (expected_starts[1],
+             expected_starts[1] + (source_coord_step * self.frame_len)),
+        ]
+        self._assert_tags(tags, "PLFRAME_SOURCE_RANGE", 2,
+                          expected_ranges,
+                          [0, self.xfecframe_len])
 
     def test_detect_noisy_plheader_open_loop(self):
         """Test detection of a noisy modulated PLHEADER in open loop

@@ -53,7 +53,8 @@ plsync_cc_impl::plsync_cc_impl(int gold_code,
                                uint64_t pls_filter_lo,
                                uint64_t pls_filter_hi)
     : gr::block("plsync_cc",
-                gr::io_signature::make(1, 1, sizeof(gr_complex)),
+                gr::io_signature::makev(
+                    1, 2, std::vector<int>{ sizeof(gr_complex), sizeof(double) }),
                 gr::io_signature::make(1, 1, sizeof(gr_complex))),
       d_debug_level(debug_level),
       d_sps(sps),
@@ -227,6 +228,8 @@ void plsync_cc_impl::forecast(int noutput_items, gr_vector_int& ninput_items_req
     // input items than output items (sort of, it's a little more complex than that). As a
     // workaround, cap the required input items based on the available output items.
     ninput_items_required[0] = std::min(ninput_items_required[0], noutput_items);
+    if (ninput_items_required.size() > 1)
+        ninput_items_required[1] = ninput_items_required[0];
 }
 
 void plsync_cc_impl::handle_tags(int ninput_items)
@@ -494,11 +497,15 @@ void plframe_idx_t::reset()
 }
 
 void plsync_cc_impl::handle_plheader(uint64_t abs_sof_idx,
+                                     double source_sof_idx,
+                                     bool source_sof_available,
                                      const gr_complex* p_plheader,
                                      plframe_info_t& frame_info)
 {
     // Cache the SOF index
     frame_info.abs_sof_idx = abs_sof_idx;
+    frame_info.source_sof_idx = source_sof_idx;
+    frame_info.source_sof_available = source_sof_available;
 
     /* Calibrate the delay between the upstream rotator and the PL Sync block.
      *
@@ -849,11 +856,16 @@ int plsync_cc_impl::general_work(int noutput_items,
                                  gr_vector_void_star& output_items)
 {
     const gr_complex* in = (const gr_complex*)input_items[0];
+    const double* source_coords =
+        input_items.size() > 1 ? (const double*)input_items[1] : nullptr;
+    const int ninput_items_available =
+        source_coords == nullptr ? ninput_items[0]
+                                 : std::min(ninput_items[0], ninput_items[1]);
     gr_complex* out = (gr_complex*)output_items[0];
     int n_produced = 0, n_consumed = 0;
 
     // Copy the desired tags to the local queue before anything else
-    handle_tags(ninput_items[0]);
+    handle_tags(ninput_items_available);
 
     // Keep processing as long as:
     //
@@ -863,16 +875,21 @@ int plsync_cc_impl::general_work(int noutput_items,
     // 2) There is space in the output buffer. If the output buffer is full, we may still
     //    consume input samples as long as we are still searching for the next frame.
     //
-    const bool empty_input = ninput_items[0] == 0;
+    const bool empty_input = ninput_items_available == 0;
     bool full_output = false;
-    while ((n_consumed < ninput_items[0] ||
+    while ((n_consumed < ninput_items_available ||
             (empty_input && d_payload_state != payload_state_t::searching)) &&
            (n_produced < noutput_items ||
             (full_output && d_payload_state == payload_state_t::searching))) {
         // If there is no payload waiting to be processed, consume the input stream until
         // the next SOF/PLHEADER is found by the frame synchronizer.
         if (d_payload_state == payload_state_t::searching) {
-            for (int i = n_consumed; i < ninput_items[0]; i++) {
+            for (int i = n_consumed; i < ninput_items_available; i++) {
+                if (source_coords != nullptr) {
+                    d_source_coord_history.push_back(source_coords[i]);
+                    if (d_source_coord_history.size() > PLHEADER_LEN)
+                        d_source_coord_history.pop_front();
+                }
                 // Step the frame synchronizer and keep refreshing the locked state. It
                 // could change any time.
                 bool is_sof = d_frame_sync->step(in[i]);
@@ -936,8 +953,16 @@ int plsync_cc_impl::general_work(int noutput_items,
                 // this point, and only at this point, the PLHEADER is available inside
                 // the frame synchronizer and can be fetched via the
                 // `frame_sync.get_plheader()` method.
-                handle_plheader(
-                    abs_sof_idx, d_frame_sync->get_plheader(), d_next_frame_info);
+                const bool source_sof_available =
+                    source_coords != nullptr &&
+                    d_source_coord_history.size() == PLHEADER_LEN;
+                const double source_sof_idx =
+                    source_sof_available ? d_source_coord_history.front() : 0.0;
+                handle_plheader(abs_sof_idx,
+                                source_sof_idx,
+                                source_sof_available,
+                                d_frame_sync->get_plheader(),
+                                d_next_frame_info);
 
                 // If this is the first SOF ever, keep going until the next. We take the
                 // PLFRAME payload as the sequence of symbols between two SOFs. Hence, we
@@ -980,6 +1005,25 @@ int plsync_cc_impl::general_work(int noutput_items,
                 // consume any more input samples until this payload is handled.
                 d_payload_state = payload_state_t::pending;
                 d_frame_cnt++;
+
+                if (d_curr_frame_info.source_sof_available &&
+                    d_next_frame_info.source_sof_available &&
+                    d_next_frame_info.source_sof_idx >
+                        d_curr_frame_info.source_sof_idx) {
+                    pmt::pmt_t range = pmt::make_dict();
+                    range = pmt::dict_add(
+                        range,
+                        pmt::intern("start"),
+                        pmt::from_double(d_curr_frame_info.source_sof_idx));
+                    range = pmt::dict_add(
+                        range,
+                        pmt::intern("end"),
+                        pmt::from_double(d_next_frame_info.source_sof_idx));
+                    add_item_tag(0,
+                                 nitems_written(0) + n_produced,
+                                 pmt::intern("PLFRAME_SOURCE_RANGE"),
+                                 range);
+                }
 
                 // If running in ACM/VCM mode, tag the beginning of the XFECFRAME to
                 // follow in the output. Include the MODCOD and the FECFRAME length so
