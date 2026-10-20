@@ -15,10 +15,12 @@
 #include "debug_level.h"
 #include "fec_params.h"
 #include "ldpc_decoder_bb_impl.h"
+#include <gnuradio/block_detail.h>
 #include <gnuradio/io_signature.h>
 #include <gnuradio/logger.h>
 #include <gnuradio/pdu.h>
 #include <boost/format.hpp>
+#include <algorithm>
 #include <cmath>
 
 #ifdef CPU_FEATURES_ARCH_ARM
@@ -90,7 +92,6 @@ ldpc_decoder_bb_impl::ldpc_decoder_bb_impl(dvb_standard_t standard,
       d_debug_level(debug_level),
       d_output_mode(outputmode),
       d_frame_cnt(0),
-      d_batch_cnt(0),
       d_total_trials(0),
       d_max_trials(max_trials)
 {
@@ -386,6 +387,16 @@ void ldpc_decoder_bb_impl::forecast(int noutput_items,
     } else {
         ninput_items_required[0] = 8 * noutput_items;
     }
+    if (detail()) {
+        const auto input = detail()->input(0);
+        gr::thread::scoped_lock guard(*input->mutex());
+        if (input->done()) {
+            const int tail_frames = std::max(1, input->items_available() /
+                                                  static_cast<int>(d_nldpc));
+            ninput_items_required[0] =
+                std::min(ninput_items_required[0], tail_frames * static_cast<int>(d_nldpc));
+        }
+    }
 }
 
 const int DEFAULT_TRIALS = 25;
@@ -402,18 +413,24 @@ int ldpc_decoder_bb_impl::general_work(int noutput_items,
     const int trials = (d_max_trials == 0) ? DEFAULT_TRIALS : d_max_trials;
     int consumed = 0;
     int output_size = d_output_mode ? d_kldpc_bytes : d_nldpc_bytes;
+    const int available_frames = std::min(ninput_items[0] / static_cast<int>(d_nldpc),
+                                          noutput_items / output_size);
 
-    for (int i = 0; i < noutput_items; i += output_size * d_simd_size) {
-        memcpy(d_soft, in + consumed, d_nldpc * d_simd_size * sizeof(int8_t));
+    for (int frame = 0; frame < available_frames;) {
+        const int batch_frames = std::min(d_simd_size, available_frames - frame);
+        memcpy(d_soft, in + consumed, d_nldpc * batch_frames * sizeof(int8_t));
+        std::fill(d_soft + d_nldpc * batch_frames,
+                  d_soft + d_nldpc * d_simd_size,
+                  int8_t{127});
 
         // LDPC Decoding
         int count = decode(d_aligned_buffer, d_soft, trials);
         if (count < 0) {
-            d_total_trials += trials;
+            d_total_trials += static_cast<uint64_t>(trials) * batch_frames;
             GR_LOG_DEBUG_LEVEL(
                 1, "frame = {:d}, trials = {:d} (max)", d_frame_cnt, trials);
         } else {
-            d_total_trials += (trials - count);
+            d_total_trials += static_cast<uint64_t>(trials - count) * batch_frames;
             GR_LOG_DEBUG_LEVEL(
                 1, "frame = {:d}, trials = {:d}", d_frame_cnt, (trials - count));
         }
@@ -421,15 +438,17 @@ int ldpc_decoder_bb_impl::general_work(int noutput_items,
         // Send decoded LLRs so that the XFECFRAME demapper can refine its SNR estimate
         d_pdu_meta = pmt::dict_add(
             d_pdu_meta, pmt::mp("frame_cnt"), pmt::from_uint64(d_frame_cnt));
+        d_pdu_meta = pmt::dict_add(
+            d_pdu_meta, pmt::mp("simd_size"), pmt::from_long(batch_frames));
         message_port_pub(
             d_pdu_port_id,
             pmt::cons(d_pdu_meta,
                       pdu::make_pdu_vector(types::byte_t,
                                            reinterpret_cast<const uint8_t*>(d_soft),
-                                           d_nldpc * d_simd_size)));
+                                           d_nldpc * batch_frames)));
 
         // Output bit-packed bytes with the hard decisions and with the MSB first
-        for (int blk = 0; blk < d_simd_size; blk++) {
+        for (int blk = 0; blk < batch_frames; blk++) {
             for (int j = 0; j < output_size; j++) {
                 *out = 0;
                 for (int k = 0; k < 8; k++) {
@@ -441,9 +460,9 @@ int ldpc_decoder_bb_impl::general_work(int noutput_items,
             }
         }
 
-        consumed += d_nldpc * d_simd_size;
-        d_frame_cnt += d_simd_size;
-        d_batch_cnt++;
+        consumed += d_nldpc * batch_frames;
+        d_frame_cnt += batch_frames;
+        frame += batch_frames;
     }
 
     // Tell runtime system how many input items we consumed on
@@ -451,7 +470,7 @@ int ldpc_decoder_bb_impl::general_work(int noutput_items,
     consume_each(consumed);
 
     // Tell runtime system how many output items we produced.
-    return noutput_items;
+    return available_frames * output_size;
 }
 
 } /* namespace dvbs2rx */
