@@ -276,7 +276,9 @@ symbol_sync_cc_impl::~symbol_sync_cc_impl() {}
 void symbol_sync_cc_impl::forecast(int noutput_items,
                                    gr_vector_int& ninput_items_required)
 {
-    ninput_items_required[0] = (d_sps * noutput_items) + d_history;
+    const int next_strobe_samples = d_jump + (d_init ? 0 : 2);
+    ninput_items_required[0] =
+        std::max(static_cast<int>(d_sps * noutput_items), next_strobe_samples) + d_history;
 }
 
 template <typename Interpolator>
