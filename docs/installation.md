@@ -33,7 +33,9 @@ Ubuntu and emulated ARM. RPM builds also select receiver-only QA. The macOS
 test job is disabled.
 
 The PL synchronization QA uses fixed noise and offset seeds for reproducible
-failures. Its noisy frequency sweep retains the 0-9 dB SNR range and averages
+failures. The payload-frequency fixtures explicitly sequence imaginary and real
+noise draws so compiler argument evaluation order cannot change the seeded
+waveforms between x86 and ARM. Its noisy frequency sweep retains the 0-9 dB SNR range and averages
 over five frames: longer averaging windows can be reset by low-SNR lock losses
 before an estimate becomes available.
 

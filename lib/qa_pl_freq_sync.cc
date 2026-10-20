@@ -37,8 +37,11 @@ BOOST_DATA_TEST_CASE(test_qpsk_payload_frequency,
     volk::vector<gr_complex> payload(length);
     for (int index = 0; index < length; ++index) {
         const auto symbol = gr_expj(M_PI / 4 + (generator() % 4) * M_PI / 2);
+        // Preserve the seeded waveform regardless of argument evaluation order.
+        const float imag_noise = noise(generator);
+        const float real_noise = noise(generator);
         payload[index] = symbol * gr_expj(2 * M_PI * offset * index) +
-                         gr_complex(noise(generator), noise(generator));
+                         gr_complex(real_noise, imag_noise);
     }
     double estimate = 0;
     BOOST_REQUIRE(
@@ -56,8 +59,11 @@ BOOST_AUTO_TEST_CASE(test_qpsk_payload_frequency_rejects_noise_and_invalid_input
     BOOST_CHECK_EQUAL(estimate, 123);
     std::mt19937 generator(903);
     std::normal_distribution<float> noise(0, 1);
-    for (auto& symbol : payload)
-        symbol = gr_complex(noise(generator), noise(generator));
+    for (auto& symbol : payload) {
+        const float imag_noise = noise(generator);
+        const float real_noise = noise(generator);
+        symbol = gr_complex(real_noise, imag_noise);
+    }
     BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
         payload.data(), payload.size(), estimate));
     payload[0] = gr_complex(std::numeric_limits<float>::quiet_NaN(), 0);
@@ -83,8 +89,10 @@ BOOST_DATA_TEST_CASE(test_8psk_payload_frequency,
     volk::vector<gr_complex> payload(length);
     for (int index = 0; index < length; ++index) {
         const auto symbol = gr_expj((generator() % 8) * M_PI / 4);
+        const float imag_noise = noise(generator);
+        const float real_noise = noise(generator);
         payload[index] = symbol * gr_expj(2 * M_PI * offset * index) +
-                         gr_complex(noise(generator), noise(generator));
+                         gr_complex(real_noise, imag_noise);
     }
     double estimate = 0;
     BOOST_REQUIRE(
@@ -104,8 +112,11 @@ BOOST_DATA_TEST_CASE(test_8psk_payload_frequency_rejects_noise_and_invalid_input
         payload.data(), payload.size(), estimate, 8));
     std::mt19937 generator(seed);
     std::normal_distribution<float> noise(0, 1);
-    for (auto& symbol : payload)
-        symbol = gr_complex(noise(generator), noise(generator));
+    for (auto& symbol : payload) {
+        const float imag_noise = noise(generator);
+        const float real_noise = noise(generator);
+        symbol = gr_complex(real_noise, imag_noise);
+    }
     BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
         payload.data(), payload.size(), estimate, 8));
     payload[0] = gr_complex(std::numeric_limits<float>::quiet_NaN(), 0);
