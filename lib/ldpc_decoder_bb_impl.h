@@ -40,6 +40,7 @@ private:
     int (*decode)(void*, int8_t*, int);
     pmt::pmt_t d_pdu_meta;
     const pmt::pmt_t d_pdu_port_id = pmt::mp("llr_pdu");
+    bool d_reference_export = false;
 
 public:
     ldpc_decoder_bb_impl(dvb_standard_t standard,
@@ -63,6 +64,8 @@ public:
     {
         return d_frame_cnt == 0 ? 0 : d_total_trials / d_frame_cnt;
     }
+
+    void set_reference_export(bool enabled) override { d_reference_export = enabled; }
 };
 
 } // namespace dvbs2rx

@@ -14,7 +14,7 @@
 /* BINDTOOL_GEN_AUTOMATIC(0)                                                       */
 /* BINDTOOL_USE_PYGCCXML(0)                                                        */
 /* BINDTOOL_HEADER_FILE(ldpc_decoder_bb.h)                                        */
-/* BINDTOOL_HEADER_FILE_HASH(6600d4874aba2dd3820976811b5e2cee)                     */
+/* BINDTOOL_HEADER_FILE_HASH(6f3a12cb8140efd0226c30b66a3e06df)                     */
 /***********************************************************************************/
 
 #include <pybind11/complex.h>
@@ -52,6 +52,10 @@ void bind_ldpc_decoder_bb(py::module& m)
         .def("get_average_trials",
              &ldpc_decoder_bb::get_average_trials,
              D(ldpc_decoder_bb, get_average_trials))
+
+        .def("set_reference_export",
+             &ldpc_decoder_bb::set_reference_export,
+             py::arg("enabled"))
 
         ;
 }

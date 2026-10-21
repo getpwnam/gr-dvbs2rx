@@ -364,6 +364,7 @@ ldpc_decoder_bb_impl::ldpc_decoder_bb_impl(dvb_standard_t standard,
     d_pdu_meta = pmt::make_dict();
     d_pdu_meta =
         pmt::dict_add(d_pdu_meta, pmt::mp("simd_size"), pmt::from_long(d_simd_size));
+    d_pdu_meta = pmt::dict_add(d_pdu_meta, pmt::mp("implementation"), pmt::intern(impl));
     d_pdu_meta = pmt::dict_add(d_pdu_meta, pmt::mp("frame_cnt"), pmt::from_uint64(0));
     message_port_register_out(d_pdu_port_id);
 }
@@ -440,12 +441,22 @@ int ldpc_decoder_bb_impl::general_work(int noutput_items,
             d_pdu_meta, pmt::mp("frame_cnt"), pmt::from_uint64(d_frame_cnt));
         d_pdu_meta =
             pmt::dict_add(d_pdu_meta, pmt::mp("simd_size"), pmt::from_long(batch_frames));
-        message_port_pub(
-            d_pdu_port_id,
-            pmt::cons(d_pdu_meta,
-                      pdu::make_pdu_vector(types::byte_t,
-                                           reinterpret_cast<const uint8_t*>(d_soft),
-                                           d_nldpc * batch_frames)));
+        const auto decoded_llrs =
+            pdu::make_pdu_vector(types::byte_t,
+                                 reinterpret_cast<const uint8_t*>(d_soft),
+                                 d_nldpc * batch_frames);
+        message_port_pub(d_pdu_port_id, pmt::cons(d_pdu_meta, decoded_llrs));
+        if (d_reference_export) {
+            auto meta = pmt::dict_add(
+                d_pdu_meta, pmt::mp("batch_converged"), pmt::from_bool(count >= 0));
+            meta = pmt::dict_add(meta,
+                                 pmt::mp("batch_trials"),
+                                 pmt::from_long(count < 0 ? trials : trials - count));
+            add_item_tag(0,
+                         nitems_written(0) + uint64_t(frame) * output_size,
+                         pmt::intern("ldpc_reference"),
+                         pmt::cons(meta, decoded_llrs));
+        }
 
         // Output bit-packed bytes with the hard decisions and with the MSB first
         for (int blk = 0; blk < batch_frames; blk++) {
