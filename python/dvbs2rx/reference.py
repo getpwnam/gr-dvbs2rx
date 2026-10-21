@@ -315,7 +315,8 @@ def capture(args):
     }
     if args.max_trials <= 0 or args.sps < 1 or not np.isfinite(args.sps):
         raise ValueError("max-trials must be positive and sps finite and >= 1")
-    if args.input.resolve() == args.output.resolve():
+    if (args.input.resolve() == args.output.resolve()
+            or (args.output.exists() and args.input.samefile(args.output))):
         raise ValueError("input and output must be different files")
     if args.input.stat().st_size % np.dtype("<c8").itemsize:
         raise ValueError("input must contain whole cf32 IQ samples")
