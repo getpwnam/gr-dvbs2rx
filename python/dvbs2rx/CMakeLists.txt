@@ -25,6 +25,7 @@ GR_PYTHON_INSTALL(
     defs.py
     params.py
     utils.py
+    reference.py
     DESTINATION ${GR_PYTHON_DIR}/gnuradio/dvbs2rx
 )
 
@@ -43,4 +44,5 @@ GR_ADD_TEST(qa_symbol_sync_cc ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/q
 GR_ADD_TEST(qa_xfecframe_demapper_cb ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_xfecframe_demapper_cb.py)
 if(ENABLE_DTV_QA)
     GR_ADD_TEST(qa_dtv_round_trip ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_dtv_round_trip.py)
+    GR_ADD_TEST(qa_reference ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/qa_reference.py)
 endif()

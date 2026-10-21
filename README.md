@@ -32,6 +32,7 @@ The project is licensed under GPLv3 and was developed primarily for non-commerci
 - [Supported operation modes and limitations.](docs/support.md)
 - [Installation instructions.](docs/installation.md)
 - [Usage instructions.](docs/usage.md)
+- [Experiment-only CPU symbol, LLR and frame export.](docs/reference-export.md)
 
 ## Main Authors
 

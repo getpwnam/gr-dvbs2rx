@@ -49,6 +49,13 @@ public:
      * \return unsigned int Average decoding interations.
      */
     virtual unsigned int get_average_trials() = 0;
+
+    /*!
+     * \brief Enable experiment-only ldpc_reference stream tags (off by default).
+     * Call only before starting the flowgraph. Tags retain the decoded LLR PDU
+     * and SIMD-batch status for exact reference export, including failed frames.
+     */
+    virtual void set_reference_export(bool enabled) = 0;
 };
 
 } // namespace dvbs2rx

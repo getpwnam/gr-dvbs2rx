@@ -113,6 +113,8 @@ int bch_decoder_bb_impl::general_work(int noutput_items,
             status, pmt::intern("frame_index"), pmt::from_uint64(d_frame_cnt));
         status =
             pmt::dict_add(status, pmt::intern("valid"), pmt::from_bool(corrections >= 0));
+        status = pmt::dict_add(
+            status, pmt::intern("corrections"), pmt::from_long(corrections));
         add_item_tag(0, nitems_written(0) + uint64_t(i) * d_k_bytes, status_key, status);
         d_frame_cnt++;
         in += d_n_bytes;
