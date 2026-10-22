@@ -7,6 +7,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "apsk.hh"
 #include "pi2_bpsk.h"
 #include "pl_defs.h"
 #include "pl_freq_sync.h"
@@ -130,6 +131,66 @@ BOOST_DATA_TEST_CASE(test_8psk_payload_frequency_rejects_noise_and_invalid_input
     BOOST_CHECK_EQUAL(estimate, 123);
 }
 
+BOOST_DATA_TEST_CASE(test_apsk_payload_frequency,
+                     bdata::make({ 4, 5 }) * bdata::make({ false, true }) *
+                         bdata::make({ -0.01, -0.00001, 0.0, 0.00001, 0.01 }) *
+                         bdata::make({ 30.0, 100.0 }),
+                     bits_per_symbol,
+                     short_frame,
+                     offset,
+                     snr)
+{
+    const unsigned int length = (short_frame ? 16200 : 64800) / bits_per_symbol;
+    const unsigned int order = bits_per_symbol == 4 ? 12 : 16;
+    AmplitudePhaseShiftKeying<16, gr_complex, int8_t> apsk16(2.85);
+    AmplitudePhaseShiftKeying<32, gr_complex, int8_t> apsk32(5.27, 2.84);
+    std::mt19937 generator(1274);
+    std::normal_distribution<float> noise(0, std::sqrt(0.5 / std::pow(10.0, snr / 10)));
+    volk::vector<gr_complex> payload(length);
+    for (unsigned int index = 0; index < length; ++index) {
+        int8_t bits[5];
+        for (auto& bit : bits)
+            bit = generator() & 1 ? -1 : 1;
+        const auto symbol = bits_per_symbol == 4 ? apsk16.map(bits) : apsk32.map(bits);
+        const float real_noise = noise(generator);
+        const float imag_noise = noise(generator);
+        payload[index] = symbol * gr_expj(2 * M_PI * offset * index) +
+                         gr_complex(real_noise, imag_noise);
+    }
+    freq_sync synchronizer(20, 0);
+    double estimate = 0;
+    BOOST_REQUIRE(synchronizer.estimate_psk_payload_frequency(
+        payload.data(), length, estimate, order));
+    BOOST_CHECK_SMALL(estimate - offset, 1.0 / (4 * (length + 90)));
+}
+
+BOOST_DATA_TEST_CASE(test_apsk_payload_frequency_rejects_noise,
+                     bdata::make({ 3240, 4050, 12960, 16200 }) * bdata::make({ 12, 16 }) *
+                         bdata::make({ 1, 2, 3, 4, 5 }),
+                     length,
+                     order,
+                     seed)
+{
+    freq_sync synchronizer(20, 0);
+    volk::vector<gr_complex> payload(length, gr_complex(0, 0));
+    double estimate = 123;
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), length, estimate, order));
+    std::mt19937 generator(seed);
+    std::normal_distribution<float> noise(0, 1);
+    for (auto& symbol : payload) {
+        const float real_noise = noise(generator);
+        const float imag_noise = noise(generator);
+        symbol = gr_complex(real_noise, imag_noise);
+    }
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), length, estimate, order));
+    payload[0] = gr_complex(std::numeric_limits<float>::quiet_NaN(), 0);
+    BOOST_CHECK(!synchronizer.estimate_psk_payload_frequency(
+        payload.data(), length, estimate, order));
+    BOOST_CHECK_EQUAL(estimate, 123);
+}
+
 /* Add frequency and phase offsets to an input complex symbol buffer */
 void rotate(gr_complex* out,
             const gr_complex* in,
@@ -165,6 +226,25 @@ struct F {
     freq_sync* p_freq_sync;
     volk::vector<gr_complex> plheader;
 };
+
+BOOST_DATA_TEST_CASE_F(F,
+                       test_header_bootstrap_preserves_periodic_estimator,
+                       bdata::make({ -0.3, -0.00001, 0.0, 0.00001, 0.3 }),
+                       offset)
+{
+    freq_sync synchronizer(4, 0);
+    volk::vector<gr_complex> rotated(PLHEADER_LEN);
+    rotate(rotated.data(), plheader.data(), offset, 2.1, PLHEADER_LEN);
+    for (unsigned int frame = 0; frame < 4; ++frame) {
+        BOOST_CHECK_SMALL(
+            synchronizer.estimate_plheader_frequency(rotated.data(), (21 << 2) | 2) -
+                offset,
+            1e-6);
+        BOOST_CHECK_EQUAL(synchronizer.estimate_coarse(rotated.data(), false),
+                          frame == 3);
+    }
+    BOOST_CHECK_SMALL(synchronizer.get_coarse_foffset() - offset, 1e-6);
+}
 
 BOOST_FIXTURE_TEST_CASE(test_frequency_reset_discards_partial_window, F)
 {

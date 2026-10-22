@@ -9,6 +9,7 @@ import struct
 from math import ceil, floor
 
 import numpy as np
+import pmt
 from gnuradio import blocks, gr, gr_unittest
 
 try:
@@ -191,7 +192,7 @@ class qa_bbdeheader_bb(gr_unittest.TestCase):
         # Total number of full UPs within n_bbframes.
         self.n_full_ups = int(floor(n_bbframes * dfl_bytes / UPL_BYTES))
 
-    def _set_up_flowgraph(self, in_stream):
+    def _set_up_flowgraph(self, in_stream, tags=()):
         """Set up the flowgraph
 
         Vector Source -> BBDEHEADER -> Vector Sink
@@ -199,10 +200,10 @@ class qa_bbdeheader_bb(gr_unittest.TestCase):
         Args:
             in_stream (bytes): Input stream to feed into the vector source.
         """
-        src = blocks.vector_source_b(tuple(in_stream))
-        bbdeheader = bbdeheader_bb(STANDARD_DVBS2, FECFRAME_NORMAL, C1_4)
+        src = blocks.vector_source_b(tuple(in_stream), False, 1, list(tags))
+        self.deheader = bbdeheader_bb(STANDARD_DVBS2, FECFRAME_NORMAL, C1_4)
         self.sink = blocks.vector_sink_b()
-        self.tb.connect(src, bbdeheader, self.sink)
+        self.tb.connect(src, self.deheader, self.sink)
 
     def _assert_up_stream(self, up_stream, n_discarded_bbframes=0):
         """Assert the output contains the UPs from the non-discarded BBFRAMEs
@@ -264,6 +265,90 @@ class qa_bbdeheader_bb(gr_unittest.TestCase):
 
         # The first BBFRAME (with the CRC error) should be discarded
         self._assert_up_stream(up_stream, n_discarded_bbframes=1)
+
+    def test_bch_failures_do_not_enter_ts_reassembly(self):
+        kbch = 16008
+        n_frames = 10
+        self._set_stream_len_params(kbch, n_frames)
+        up_stream = gen_up_stream(self.n_ups)
+        original = gen_bbframe_stream(kbch, n_frames, up_stream)
+        for bad_frames in ({0}, {4}, {9}, {3, 4}, set(range(n_frames))):
+            with self.subTest(bad_frames=bad_frames):
+                self.tb = gr.top_block()
+                stream = bytearray(original)
+                tags = []
+                for frame in range(n_frames):
+                    tag = gr.tag_t()
+                    tag.offset = frame * (kbch // 8)
+                    tag.key = pmt.intern("bch_frame_status")
+                    tag.value = pmt.to_pmt({
+                        "frame_index":
+                        frame,
+                        "valid":
+                        frame not in bad_frames,
+                        "corrections":
+                        -1 if frame in bad_frames else 0,
+                    })
+                    tags.append(tag)
+                    if frame in bad_frames:
+                        # Leave a valid BBHEADER; corrupt only its payload.
+                        stream[tag.offset + BBHEADER_LEN + 100] ^= 0xff
+                self._set_up_flowgraph(stream, tags)
+                self.tb.run()
+                expected = bytearray()
+                for packet in range(self.n_full_ups):
+                    first = (packet * UPL_BYTES + 1) // self.dfl_bytes
+                    last = ((packet + 1) * UPL_BYTES) // self.dfl_bytes
+                    if not bad_frames.intersection(range(first, last + 1)):
+                        expected += up_stream[packet * UPL_BYTES:(packet + 1) *
+                                              UPL_BYTES]
+                self.assertEqual(bytes(self.sink.data()), bytes(expected))
+                self.assertEqual(self.deheader.get_bbframe_count(), n_frames)
+                self.assertEqual(self.deheader.get_bbframe_drop_count(),
+                                 len(bad_frames))
+                self.assertEqual(self.deheader.get_error_count(), 0)
+                self.assertEqual(self.deheader.get_packet_count(),
+                                 len(expected) // UPL_BYTES)
+
+    def test_malformed_bch_status_is_not_accepted(self):
+        kbch = 16008
+        self._set_stream_len_params(kbch, 2)
+        up_stream = gen_up_stream(self.n_ups)
+        stream = gen_bbframe_stream(kbch, 2, up_stream)
+        for value, offset, copies in (({}, 0, 1), ({
+                "valid": 1
+        }, 0, 1), ({
+                "valid": True
+        }, 1, 1), ({
+                "valid": True
+        }, 0, 2)):
+            with self.subTest(value=value, offset=offset, copies=copies):
+                self.tb = gr.top_block()
+                tag = gr.tag_t()
+                tag.offset = offset
+                tag.key = pmt.intern("bch_frame_status")
+                tag.value = pmt.to_pmt(value)
+                self._set_up_flowgraph(stream, [tag] * copies)
+                self.tb.run()
+                self._assert_up_stream(up_stream, n_discarded_bbframes=1)
+                self.assertEqual(self.deheader.get_bbframe_count(), 2)
+                self.assertEqual(self.deheader.get_bbframe_drop_count(), 1)
+
+    def test_valid_bch_status_does_not_bypass_packet_crc(self):
+        kbch = 16008
+        self._set_stream_len_params(kbch, 2)
+        up_stream = gen_up_stream(self.n_ups)
+        stream = bytearray(gen_bbframe_stream(kbch, 2, up_stream))
+        stream[BBHEADER_LEN + 100] ^= 0xff
+        tag = gr.tag_t()
+        tag.offset = 0
+        tag.key = pmt.intern("bch_frame_status")
+        tag.value = pmt.to_pmt({"valid": True})
+        self._set_up_flowgraph(stream, [tag])
+        self.tb.run()
+        self.assertEqual(self.deheader.get_bbframe_drop_count(), 0)
+        self.assertEqual(self.deheader.get_error_count(), 1)
+        self.assertEqual(self.sink.data()[1] & 0x80, 0x80)
 
     def test_undetected_dfl_corruption(self):
         """Test undetectable errors on the DFL field of the BBHEADER

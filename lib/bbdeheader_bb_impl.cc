@@ -157,13 +157,36 @@ int bbdeheader_bb_impl::general_work(int noutput_items,
     const unsigned int out_bbframes =
         std::ceil(static_cast<double>(noutput_items * 8) / d_max_dfl);
     const unsigned int n_bbframes = std::min(in_bbframes, out_bbframes);
+    const auto status_key = pmt::intern("bch_frame_status");
+    const auto valid_key = pmt::intern("valid");
+    std::vector<tag_t> statuses;
 
     for (unsigned int i = 0; i < n_bbframes; i++) {
+        const uint64_t offset = nitems_read(0) + uint64_t(i) * d_kbch_bytes;
+        get_tags_in_range(statuses, 0, offset, offset + d_kbch_bytes, status_key);
+        bool bch_valid = true;
+        if (!statuses.empty()) {
+            const auto status = statuses.front().value;
+            const auto valid = pmt::is_dict(status)
+                                   ? pmt::dict_ref(status, valid_key, pmt::PMT_NIL)
+                                   : pmt::PMT_NIL;
+            if (statuses.size() != 1 || statuses.front().offset != offset ||
+                !pmt::is_bool(valid)) {
+                d_logger->warn("Invalid BCH frame status; dropping BBFRAME.");
+                bch_valid = false;
+            } else {
+                bch_valid = pmt::to_bool(valid);
+                if (!bch_valid)
+                    GR_LOG_DEBUG_LEVEL(1, "BCH-invalid BBFRAME dropped.");
+            }
+        }
+
         // Parse and validate the BBHEADER
-        const bool bbheader_valid = parse_bbheader(in, &d_bbheader);
+        const bool bbheader_valid = bch_valid && parse_bbheader(in, &d_bbheader);
         d_bbframe_cnt++;
         if (!bbheader_valid) {
             d_synched = false;
+            d_partial_ts_bytes = 0;
             in += d_kbch_bytes; // jump to the next BBFRAME
             d_bbframe_drop_cnt++;
             continue;

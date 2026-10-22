@@ -67,6 +67,7 @@ struct plframe_info_t {
     pls_info_t pls;
     bool coarse_corrected = false;
     bool coarse_est_available = false;
+    bool fine_est_available = false;
     double coarse_foffset = 0;
     double fine_foffset = 0;
     uint64_t abs_sof_idx = 0;

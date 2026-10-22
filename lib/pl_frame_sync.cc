@@ -148,6 +148,20 @@ bool frame_sync::step(const gr_complex& in)
     const float abs_sum = abs(sof_corr + plsc_corr);
     const float abs_diff = abs(sof_corr - plsc_corr);
     d_timing_metric = (abs_sum > abs_diff) ? abs_sum : abs_diff;
+    // Bound excess gain without promoting weak headers before AGC has settled.
+    auto& plsc_buf = (d_sym_cnt & 1) ? d_plsc_o_buf : d_plsc_e_buf;
+    gr_complex sof_energy, plsc_energy;
+    volk_32fc_x2_conjugate_dot_prod_32fc(
+        &sof_energy, &d_sof_buf.back(), &d_sof_buf.back(), SOF_CORR_LEN);
+    volk_32fc_x2_conjugate_dot_prod_32fc(
+        &plsc_energy, &plsc_buf.back(), &plsc_buf.back(), PLSC_CORR_LEN);
+    const float energy = sof_energy.real() + plsc_energy.real();
+    d_timing_metric =
+        (std::isfinite(energy) && energy > 0)
+            ? d_timing_metric / std::max(1.0,
+                                         std::sqrt(static_cast<double>(energy) /
+                                                   (SOF_CORR_LEN + PLSC_CORR_LEN)))
+            : 0;
     /* NOTE: the complex version of the timing metric could be used to obtain a
      * rough frequency offset estimate. When the frequency offset is constant
      * over the PLHEADER, all differentials have a factor of exp(-j*2*pi*f0),
@@ -167,7 +181,6 @@ bool frame_sync::step(const gr_complex& in)
     /* Is this a peak? */
     const bool is_peak =
         locked ? (d_timing_metric > threshold_l) : (d_timing_metric > threshold_u);
-    /* TODO: check the average symbol magnitude and normalize */
 
     /* Is a peak expected? When locked, the program can only hit this point when
      * processing the last PLHEADER symbol, which is when the timing metric peak

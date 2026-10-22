@@ -20,9 +20,12 @@ namespace gr {
 namespace dvbs2rx {
 
 /*!
- * \brief <+description of block+>
+ * \brief Recover MPEG-TS packets from BBFRAMEs, checking header and packet CRCs.
  * \ingroup dvbs2rx
  *
+ * When upstream BCH status tags are present, frames marked invalid are counted
+ * and dropped before reassembly. Partial packets cannot cross a dropped frame.
+ * Untagged BBFRAME input retains header/packet CRC validation.
  */
 class DVBS2RX_API bbdeheader_bb : virtual public gr::block
 {
@@ -61,7 +64,7 @@ public:
     virtual uint64_t get_bbframe_count() = 0;
 
     /*!
-     * \brief Get count of BBFRAMEs dropped due to invalid BBHEADER.
+     * \brief Get count of BBFRAMEs dropped due to invalid BCH status or BBHEADER.
      * \return uint64_t Number of BBFRAMEs dropped so far.
      */
     virtual uint64_t get_bbframe_drop_count() = 0;
