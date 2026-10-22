@@ -151,6 +151,41 @@ BOOST_DATA_TEST_CASE_F(F, test_sof_detection, bdata::xrange(n_plsc_codewords), p
 }
 
 BOOST_DATA_TEST_CASE_F(F,
+                       test_gain_invariant_sof_detection,
+                       bdata::make({ 1.0f, 100.0f, 10000.0f }),
+                       gain)
+{
+    // A high-amplitude tone or impulse is not a header.
+    for (int i = 0; i < 1000; ++i)
+        BOOST_CHECK(!p_frame_sync->step(gain * gr_complex(1, 0)));
+    BOOST_CHECK(!p_frame_sync->step(gain * gr_complex(100, 100)));
+    for (int i = 0; i < 1000; ++i)
+        BOOST_CHECK(!p_frame_sync->step(gr_complex(0, 0)));
+    for (int i = 0; i < PLHEADER_LEN; ++i)
+        BOOST_CHECK_EQUAL(p_frame_sync->step(gain * plheader[i]), i == PLHEADER_LEN - 1);
+    BOOST_CHECK_CLOSE(
+        p_frame_sync->get_timing_metric(), SOF_CORR_LEN + PLSC_CORR_LEN, 0.001);
+}
+
+BOOST_FIXTURE_TEST_CASE(test_weak_header_preserves_agc_acquisition_threshold, F)
+{
+    for (const auto symbol : plheader)
+        BOOST_CHECK(!p_frame_sync->step(0.5f * symbol));
+    BOOST_CHECK_CLOSE(
+        p_frame_sync->get_timing_metric(), 0.25f * (SOF_CORR_LEN + PLSC_CORR_LEN), 0.001);
+    BOOST_CHECK(!p_frame_sync->is_locked_or_almost());
+}
+
+BOOST_FIXTURE_TEST_CASE(test_subnormal_differential_energy, F)
+{
+    for (int i = 0; i < 1000; ++i) {
+        BOOST_CHECK(!p_frame_sync->step(gr_complex(1e-10f, 0)));
+        BOOST_CHECK(std::isfinite(p_frame_sync->get_timing_metric()));
+        BOOST_CHECK_LE(p_frame_sync->get_timing_metric(), SOF_CORR_LEN + PLSC_CORR_LEN);
+    }
+}
+
+BOOST_DATA_TEST_CASE_F(F,
                        test_sof_detection_under_freq_offset,
                        bdata::xrange(n_plsc_codewords) *
                            bdata::make({ -0.25, -0.13, 0.03, 0.19, 0.25 }),

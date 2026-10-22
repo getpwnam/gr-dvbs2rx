@@ -101,12 +101,30 @@ void freq_sync::reset()
     fine_est_ready = false;
 }
 
+double freq_sync::estimate_plheader_frequency(const gr_complex* in, uint8_t plsc)
+{
+    volk_32fc_x2_multiply_32fc(
+        pilot_mod_rm.data(), in, &plheader_conj[plsc * PLHEADER_LEN], PLHEADER_LEN);
+    double phase = 0;
+    double weighted_phase = 0;
+    double weight_sum = 0;
+    const double midpoint = (PLHEADER_LEN - 1) / 2.0;
+    for (unsigned int i = 0; i < PLHEADER_LEN; ++i) {
+        if (i)
+            phase += std::arg(pilot_mod_rm[i] * std::conj(pilot_mod_rm[i - 1]));
+        const double weight = i - midpoint;
+        weighted_phase += weight * phase;
+        weight_sum += weight * weight;
+    }
+    return weighted_phase / (2 * M_PI * weight_sum);
+}
+
 bool freq_sync::estimate_psk_payload_frequency(const gr_complex* payload,
                                                unsigned int length,
                                                double& frequency,
                                                unsigned int order) const
 {
-    if (order != 4 && order != 8)
+    if (order != 4 && order != 8 && order != 12 && order != 16)
         return false;
     constexpr unsigned int fft_size = 32768;
     thread_local gr::fft::fft_complex_fwd transform(fft_size);
@@ -119,6 +137,12 @@ bool freq_sync::estimate_psk_payload_frequency(const gr_complex* payload,
         input[index] = squared * squared;
         if (order == 8)
             input[index] *= input[index];
+        else if (order == 12)
+            input[index] *= input[index] * input[index];
+        else if (order == 16) {
+            input[index] *= input[index];
+            input[index] *= input[index];
+        }
     }
     transform.execute();
     const auto* spectrum = transform.get_outbuf();
@@ -133,8 +157,11 @@ bool freq_sync::estimate_psk_payload_frequency(const gr_complex* payload,
             peak = index;
         }
     }
-    // Eighth-power lines are weaker near the 8PSK threshold; preserve the QPSK gate.
-    const double minimum_peak_fraction = order == 8 ? 0.002 : 0.01;
+    // APSK ring symmetries produce twelfth/sixteenth-power lines. Account for
+    // zero-padding in their shorter payloads; preserve the existing PSK gates.
+    const double minimum_peak_fraction =
+        order > 8 ? 0.01 * std::min(length, fft_size) / fft_size
+                  : (order == 8 ? 0.002 : 0.01);
     if (!std::isfinite(total) || total <= 0 || maximum / total < minimum_peak_fraction)
         return false;
     if (peak >= static_cast<int>(fft_size / 2))

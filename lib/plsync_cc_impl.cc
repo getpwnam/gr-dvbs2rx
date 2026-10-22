@@ -519,6 +519,7 @@ void plsync_cc_impl::handle_plheader(uint64_t abs_sof_idx,
         // partial averaging windows. The preceding payload retains its own cache.
         d_freq_sync->reset();
         frame_info.coarse_est_available = false;
+        frame_info.fine_est_available = false;
         frame_info.coarse_corrected = false;
         frame_info.coarse_foffset = 0;
         frame_info.fine_foffset = 0;
@@ -640,10 +641,9 @@ void plsync_cc_impl::handle_plheader(uint64_t abs_sof_idx,
      * correction. The dummy frames are too short, so there is a good chance the
      * correction will arrive late at the rotator message port, i.e., after the rotator
      * has already processed the corresponding index, which we should avoid. */
-    const bool payload_tracking =
-        !frame_info.pls.has_pilots &&
-        (frame_info.pls.n_mod == 2 || frame_info.pls.n_mod == 3) &&
-        d_psk_payload_tracking;
+    const bool payload_tracking = !frame_info.pls.has_pilots &&
+                                  frame_info.pls.n_mod >= 2 &&
+                                  frame_info.pls.n_mod <= 5 && d_psk_payload_tracking;
     if (d_locked && !payload_tracking && !frame_info.coarse_corrected && new_coarse_est &&
         !frame_info.pls.dummy_frame) {
         control_rotator_freq(abs_sof_idx,
@@ -674,6 +674,16 @@ int plsync_cc_impl::handle_payload(int noutput_items,
         // Descramble the payload
         d_pl_descrambler->descramble(p_payload, frame_info.pls.payload_len);
 
+        // Bootstrap from this header without changing the periodic coarse estimator.
+        const bool bootstrap_coarse = !frame_info.coarse_est_available;
+        const double coarse_foffset =
+            bootstrap_coarse ? d_freq_sync->estimate_plheader_frequency(
+                                   frame_info.plheader.data(), frame_info.pls.plsc)
+                             : frame_info.coarse_foffset;
+        const bool coarse_corrected =
+            bootstrap_coarse ? std::abs(coarse_foffset) < fine_foffset_corr_range
+                             : frame_info.coarse_corrected;
+
         if (frame_info.pls.has_pilots) {
             for (int i = 0; i < frame_info.pls.n_pilots; i++) {
                 const gr_complex* p_pilots =
@@ -700,7 +710,7 @@ int plsync_cc_impl::handle_payload(int noutput_items,
         // processed the subsequent PLHEADER, we must check the state cached on the
         // `frame_info` structure.
         bool new_fine_est = false;
-        if (frame_info.coarse_corrected) {
+        if (coarse_corrected) {
             if (frame_info.pls.has_pilots) {
                 d_freq_sync->estimate_fine_pilot_mode(frame_info.plheader.data(),
                                                       p_descrambled_payload,
@@ -712,17 +722,20 @@ int plsync_cc_impl::handle_payload(int noutput_items,
                     frame_info.plheader_phase,
                     next_frame_info.plheader_phase,
                     frame_info.pls.plframe_len,
-                    frame_info.coarse_foffset);
+                    coarse_foffset);
             }
         }
         frame_info.fine_foffset = new_fine_est ? d_freq_sync->get_fine_foffset() : 0;
         d_psk_payload_tracking = false;
-        if (frame_info.coarse_est_available && !frame_info.pls.has_pilots &&
-            (frame_info.pls.n_mod == 2 || frame_info.pls.n_mod == 3) &&
+        if (!frame_info.pls.has_pilots && frame_info.pls.n_mod >= 2 &&
+            frame_info.pls.n_mod <= 5 &&
             next_frame_info.abs_sof_idx ==
                 frame_info.abs_sof_idx + frame_info.pls.plframe_len) {
             double payload_frequency = 0;
-            const unsigned int order = 1U << frame_info.pls.n_mod;
+            const unsigned int order = frame_info.pls.n_mod == 4 ? 12
+                                       : frame_info.pls.n_mod == 5
+                                           ? 16
+                                           : 1U << frame_info.pls.n_mod;
             const double ambiguity_period = 1.0 / order;
             if (d_freq_sync->estimate_psk_payload_frequency(p_descrambled_payload,
                                                             frame_info.pls.payload_len,
@@ -730,8 +743,7 @@ int plsync_cc_impl::handle_payload(int noutput_items,
                                                             order)) {
                 payload_frequency +=
                     ambiguity_period *
-                    std::round((frame_info.coarse_foffset - payload_frequency) /
-                               ambiguity_period);
+                    std::round((coarse_foffset - payload_frequency) / ambiguity_period);
                 const double phase_cycles =
                     (next_frame_info.plheader_phase - frame_info.plheader_phase) /
                     (2 * GR_M_PI);
@@ -739,11 +751,14 @@ int plsync_cc_impl::handle_payload(int noutput_items,
                     payload_frequency * frame_info.pls.plframe_len - phase_cycles);
                 frame_info.fine_foffset =
                     (phase_cycles + cycles) / frame_info.pls.plframe_len;
-                frame_info.coarse_corrected = true;
+                if (!bootstrap_coarse)
+                    frame_info.coarse_corrected = true;
                 new_fine_est = true;
                 d_psk_payload_tracking = true;
             }
         }
+
+        frame_info.fine_est_available = new_fine_est;
 
         // If there is a new fine frequency offset estimate, update the external rotator
         if (new_fine_est) {
@@ -789,7 +804,7 @@ int plsync_cc_impl::handle_payload(int noutput_items,
     // correction (i.e., in open-loop) focusing on the residual frequency offset remaining
     // from the external (delayed) correction over this frame only.
     const float phase_inc =
-        frame_info.coarse_corrected ? (2.0 * GR_M_PI * frame_info.fine_foffset) : 0;
+        frame_info.fine_est_available ? 2.0 * GR_M_PI * frame_info.fine_foffset : 0;
     gr_complex expj_phase_inc = gr_expj(-phase_inc);
 
     // Output the phase-corrected and descrambled data symbols.
@@ -818,13 +833,13 @@ int plsync_cc_impl::handle_payload(int noutput_items,
             // equal to the phase estimate obtained from the most recent (preceding)
             // 36-symbol pilot block. Skip the very first 16-slot sequence, given it is
             // preceded by the PLHEADER instead of a pilot block. Also, do so only if
-            // coarse-corrected, as otherwise the pilot phase estimates are uninitialized.
+            // fine-estimated, as otherwise the pilot phase estimates are uninitialized.
             //
             // NOTE: there is always an interation where the current slot (d_idx.i_slot)
             // is the starting slot of a 16-slot sequence due to the limit imposed by the
             // "max_slots_to_process" variable. Hence, the conditional below is guaranteed
             // to be hit for every 16-slot sequence.
-            if (frame_info.coarse_corrected && d_idx.i_pilot_blk > 0 &&
+            if (frame_info.fine_est_available && d_idx.i_pilot_blk > 0 &&
                 (d_idx.i_slot % SLOTS_PER_PILOT_BLK) == 0) {
                 float pilot_phase = d_freq_sync->get_pilot_phase(d_idx.i_pilot_blk - 1);
                 d_phase_corr = gr_expj(-pilot_phase);
@@ -917,6 +932,7 @@ int plsync_cc_impl::general_work(int noutput_items,
                     d_freq_sync->reset();
                     for (auto* frame : { &d_curr_frame_info, &d_next_frame_info }) {
                         frame->coarse_est_available = false;
+                        frame->fine_est_available = false;
                         frame->coarse_corrected = false;
                         frame->coarse_foffset = 0;
                         frame->fine_foffset = 0;

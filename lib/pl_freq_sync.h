@@ -141,6 +141,9 @@ private:
 public:
     void reset();
 
+    /** Estimate a frame-local carrier slope without changing periodic estimator state. */
+    double estimate_plheader_frequency(const gr_complex* in, uint8_t plsc);
+
     bool estimate_psk_payload_frequency(const gr_complex* payload,
                                         unsigned int length,
                                         double& frequency,
