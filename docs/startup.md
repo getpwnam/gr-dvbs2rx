@@ -3,8 +3,8 @@
 The receiver must distinguish a detected header from settled gain and carrier
 estimates. These corrections address the high-SNR investigation in
 [getpwnam/wavescope#1274](https://github.com/getpwnam/wavescope/issues/1274).
-They do not change BCH validity, discard failed FEC frames, append IQ padding,
-or reduce the configured coarse-estimation period.
+They preserve BCH validity and every attempted-frame/error counter, do not append
+IQ padding, and do not reduce the configured coarse-estimation period.
 
 ## Header correlation
 
@@ -63,3 +63,23 @@ acquisition, clean/noisy APSK frequency estimates, noise-only rejection, and
 non-mutating header bootstrap. Whole-receiver acceptance additionally requires
 the WaveScope unchanged-input corpus and native-backed carrier/first-frame
 tests; CTest alone is not a qualification claim.
+
+## BCH validity before transport reassembly
+
+Improved acquisition also exposes additional uncorrectable frames near the FEC
+threshold. A valid BBHEADER CRC does not validate the DATAFIELD: the header can
+survive while the payload contains bit errors. Passing those bytes into MPEG-TS
+reassembly can contaminate otherwise useful whole-window output.
+
+The deheader now honors upstream `bch_frame_status` tags. A frame marked invalid
+is counted and dropped before packet reassembly, and any partial packet is
+cleared so bytes cannot be joined across the loss. Malformed, duplicate or
+misaligned status tags are warned about and rejected. Untagged input retains
+the existing header/packet CRC checks; a valid status never bypasses those checks.
+
+Every BCH attempt and failure remains in the decoder counters. Deheader
+processed/drop counters also retain these rejected frames. Packet/error counters
+describe packets actually emitted, as before. This strengthens the inputs to
+transport recovery; it does not relax WaveScope's zero-TS-error acceptance gate,
+erase failed observations, or introduce a startup warmup discard. BBFRAME export
+retains its separate validity policy.
