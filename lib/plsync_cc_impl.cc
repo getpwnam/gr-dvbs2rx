@@ -515,13 +515,13 @@ void plsync_cc_impl::handle_plheader(uint64_t abs_sof_idx,
     const double previous_rot_freq = d_rot_ctrl.current.freq;
     calibrate_tag_delay(abs_sof_idx);
     if (d_rot_ctrl.current.freq != previous_rot_freq) {
-        // A tagged correction changes the reference of both cached estimates and
-        // partial averaging windows. The preceding payload retains its own cache.
-        d_freq_sync->reset();
-        frame_info.coarse_est_available = false;
+        // Rebase periodic evidence; the preceding payload retains its own cache.
+        d_freq_sync->shift_frequency_reference(d_rot_ctrl.current.freq -
+                                               previous_rot_freq);
+        frame_info.coarse_est_available = d_freq_sync->has_coarse_foffset_est();
         frame_info.fine_est_available = false;
-        frame_info.coarse_corrected = false;
-        frame_info.coarse_foffset = 0;
+        frame_info.coarse_corrected = d_freq_sync->is_coarse_corrected();
+        frame_info.coarse_foffset = d_freq_sync->get_coarse_foffset();
         frame_info.fine_foffset = 0;
         d_psk_payload_tracking = false;
     }

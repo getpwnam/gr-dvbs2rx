@@ -20,8 +20,8 @@ the square root/division to avoid subnormal reciprocal overflow.
 
 ## Frame-local carrier bootstrap
 
-The periodic coarse estimator can be unavailable both on initial acquisition
-and after a tagged upstream rotator update resets its averaging window.
+The periodic coarse estimator can be unavailable on initial acquisition
+and after frame-lock loss.
 Waiting for that period before correcting already detected frames corrupts
 otherwise decodable initial payloads.
 
@@ -31,8 +31,18 @@ reset the periodic accumulator. It enables feed-forward correction of the
 current payload. A successful payload/pilot fine estimate can also start
 feedback after two observed headers instead of waiting for a coarse average.
 The absolute feedback coordinate still targets the following physical frame.
-Lock loss and rotator-reference changes discard cached state; reacquisition
-uses fresh header/payload evidence rather than the pre-loss estimate.
+Lock loss discards cached state; reacquisition uses fresh header/payload
+evidence rather than the pre-loss estimate.
+
+Tagged rotator-reference changes rebase the accumulated lag correlations
+instead of discarding them. At lag `m`, a known normalized frequency change
+`delta` multiplies the correlation by `exp(j*2*pi*delta*m)`. The averaging
+count therefore still reaches the configured period under frequent feedback.
+Completed coarse estimates are shifted to the new reference and checked
+against the unchanged fine-correction range; incomplete estimates cannot
+qualify carrier correction. Cached fine estimates are invalidated. This
+prevents early payload feedback from repeatedly resetting a 20-header
+estimator before it can establish carrier qualification.
 
 Pilot phase availability is tracked separately from periodic coarse state.
 This permits pilot phase resets during a bootstrap-corrected frame without
