@@ -257,6 +257,7 @@ BOOST_FIXTURE_TEST_CASE(test_frequency_reset_discards_partial_window, F)
                               frame == 3);
         BOOST_REQUIRE(synchronizer.is_coarse_corrected());
         synchronizer.reset();
+        BOOST_CHECK(!synchronizer.has_coarse_foffset_est());
         BOOST_CHECK(!synchronizer.is_coarse_corrected());
         BOOST_CHECK_EQUAL(synchronizer.get_coarse_foffset(), 0);
         BOOST_CHECK_EQUAL(synchronizer.get_fine_foffset(), 0);
@@ -266,6 +267,72 @@ BOOST_FIXTURE_TEST_CASE(test_frequency_reset_discards_partial_window, F)
             BOOST_CHECK_EQUAL(synchronizer.estimate_coarse(rotated.data(), false),
                               frame == 3);
         BOOST_CHECK_SMALL(synchronizer.get_coarse_foffset() - offset, 1e-6);
+    }
+}
+
+BOOST_DATA_TEST_CASE_F(F,
+                       test_reference_updates_preserve_periodic_accumulation,
+                       bdata::make({ -0.2, -0.0001, 0.0, 0.2 }) *
+                           bdata::make({ false, true }),
+                       initial_offset,
+                       full)
+{
+    freq_sync synchronizer(20, 0);
+    volk::vector<gr_complex> rotated(PLHEADER_LEN);
+    double offset = initial_offset;
+    for (unsigned int frame = 0; frame < 60; ++frame) {
+        rotate(rotated.data(), plheader.data(), offset, 0.3, PLHEADER_LEN);
+        const bool updated =
+            synchronizer.estimate_coarse(rotated.data(), full, (21 << 2) | 2);
+        BOOST_CHECK_EQUAL(updated, frame % 20 == 19);
+        if (updated)
+            BOOST_CHECK_SMALL(synchronizer.get_coarse_foffset() - offset, 1e-6);
+        const double shift = frame % 2 ? 0.00001 : -0.00003;
+        offset += shift;
+        synchronizer.shift_frequency_reference(shift);
+        BOOST_CHECK_EQUAL(synchronizer.has_coarse_foffset_est(), frame >= 19);
+        if (frame >= 19) {
+            BOOST_CHECK_SMALL(synchronizer.get_coarse_foffset() - offset, 1e-6);
+            BOOST_CHECK_EQUAL(synchronizer.is_coarse_corrected(),
+                              std::abs(offset) < fine_foffset_corr_range);
+        } else {
+            BOOST_CHECK(!synchronizer.is_coarse_corrected());
+        }
+    }
+}
+
+BOOST_FIXTURE_TEST_CASE(test_reference_update_preserves_only_measured_state, F)
+{
+    freq_sync synchronizer(4, 0);
+    synchronizer.shift_frequency_reference(0.01);
+    BOOST_CHECK(!synchronizer.has_coarse_foffset_est());
+    BOOST_CHECK(!synchronizer.is_coarse_corrected());
+    volk::vector<gr_complex> rotated(PLHEADER_LEN);
+    rotate(rotated.data(), plheader.data(), 0.02, 0, PLHEADER_LEN);
+    for (unsigned int frame = 0; frame < 4; ++frame)
+        synchronizer.estimate_coarse(rotated.data(), false);
+    BOOST_REQUIRE(synchronizer.has_coarse_foffset_est());
+    BOOST_CHECK(!synchronizer.is_coarse_corrected());
+    synchronizer.shift_frequency_reference(-0.02);
+    BOOST_CHECK_SMALL(synchronizer.get_coarse_foffset(), 1e-6);
+    BOOST_CHECK(synchronizer.is_coarse_corrected());
+    synchronizer.shift_frequency_reference(0.01);
+    BOOST_CHECK(!synchronizer.is_coarse_corrected());
+    synchronizer.reset();
+    synchronizer.shift_frequency_reference(-0.01);
+    BOOST_CHECK(!synchronizer.has_coarse_foffset_est());
+    BOOST_CHECK(!synchronizer.is_coarse_corrected());
+}
+
+BOOST_FIXTURE_TEST_CASE(test_reference_update_rejects_nonfinite_changes, F)
+{
+    for (const double shift : { std::numeric_limits<double>::quiet_NaN(),
+                                std::numeric_limits<double>::infinity(),
+                                -std::numeric_limits<double>::infinity() }) {
+        BOOST_CHECK_THROW(p_freq_sync->shift_frequency_reference(shift),
+                          std::invalid_argument);
+        BOOST_CHECK(!p_freq_sync->has_coarse_foffset_est());
+        BOOST_CHECK(!p_freq_sync->is_coarse_corrected());
     }
 }
 

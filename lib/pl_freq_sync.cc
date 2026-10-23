@@ -18,6 +18,8 @@
 #include <gnuradio/math.h>
 #include <boost/format.hpp>
 #include <cassert>
+#include <cmath>
+#include <stdexcept>
 
 namespace gr {
 namespace dvbs2rx {
@@ -30,6 +32,7 @@ freq_sync::freq_sync(unsigned int period, int debug_level)
       N(PLHEADER_LEN),
       L(PLHEADER_LEN - 1),
       coarse_corrected(false),
+      coarse_est_ready(false),
       fine_foffset(0.0),
       w_angle_avg(0.0),
       fine_est_ready(false),
@@ -95,8 +98,27 @@ void freq_sync::reset()
 {
     coarse_foffset = 0;
     coarse_corrected = false;
+    coarse_est_ready = false;
     i_frame = 0;
     std::fill(pilot_corr.begin(), pilot_corr.end(), 0);
+    fine_foffset = 0;
+    fine_est_ready = false;
+}
+
+void freq_sync::shift_frequency_reference(double normalized_shift)
+{
+    if (!std::isfinite(normalized_shift))
+        throw std::invalid_argument("frequency reference shift must be finite");
+
+    // A frequency change rotates lag-m correlation by exp(j*2*pi*shift*m).
+    const double phase_step = 2 * M_PI * std::remainder(normalized_shift, 1.0);
+    for (unsigned int lag = 1; lag < pilot_corr.size(); ++lag)
+        pilot_corr[lag] *= gr_expj(phase_step * lag);
+
+    if (coarse_est_ready) {
+        coarse_foffset = std::remainder(coarse_foffset + normalized_shift, 1.0);
+        coarse_corrected = std::abs(coarse_foffset) < fine_foffset_corr_range;
+    }
     fine_foffset = 0;
     fine_est_ready = false;
 }
@@ -263,6 +285,7 @@ bool freq_sync::estimate_coarse(const gr_complex* in, bool full, uint8_t plsc)
      * [-0.5,0.5]. Enforce that to avoid numerical problems.
      */
     coarse_foffset = branchless_clip(w_angle_avg / (2 * M_PI), 0.5f);
+    coarse_est_ready = true;
 
     /* Declare that the frequency offset is coarsely corrected once the residual
      * offset falls within the fine correction range */

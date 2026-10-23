@@ -609,6 +609,22 @@ class qa_plsync_cc(gr_unittest.TestCase):
                             debug_tags=False)
         self.assertAlmostEqual(self.plsync.get_freq_offset(), fe)
 
+    def test_carrier_updates_preserve_periodic_estimator(self):
+        self.freq_est_period = 20
+        for offset in (-2e-5, 2e-5, 0.02):
+            with self.subTest(offset=offset):
+                self._run_flowgraph(120,
+                                    freq_offset=offset,
+                                    closed_loop=True,
+                                    pilots=True,
+                                    debug_tags=False)
+                self.assertTrue(self.plsync.get_locked())
+                self.assertGreater(self.plsync.get_frame_count(), 100)
+                self.assertTrue(self.plsync.get_coarse_freq_corr_state())
+                self.assertAlmostEqual(self.plsync.get_freq_offset(),
+                                       offset,
+                                       places=5)
+
     def test_freq_est_noisy_rot_stream_closed_loop(self):
         """Test closed-loop freq. estimation over a noisy but rotated stream
 

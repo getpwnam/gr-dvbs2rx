@@ -93,6 +93,7 @@ private:
     unsigned int N;        /**< "preamble" length */
     unsigned int L;        /**< used phase differentials (<= N) */
     bool coarse_corrected; /**< residual offset is sufficiently low */
+    bool coarse_est_ready; /**< a complete periodic estimate is available */
 
     /* NOTE: In principle, we could make N equal to the SOF length (26) and L =
      * N-1 (i.e. 25), in which case coarse frequency offset estimation would be
@@ -140,6 +141,9 @@ private:
 
 public:
     void reset();
+
+    /** Rebase accumulated evidence after a known upstream frequency change. */
+    void shift_frequency_reference(double normalized_shift);
 
     /** Estimate a frame-local carrier slope without changing periodic estimator state. */
     double estimate_plheader_frequency(const gr_complex* in, uint8_t plsc);
@@ -321,6 +325,8 @@ public:
      * \return (double) Last normalized coarse frequency offset estimate.
      */
     double get_coarse_foffset() { return coarse_foffset; }
+
+    bool has_coarse_foffset_est() { return coarse_est_ready; }
 
     /**
      * \brief Get the last fine frequency offset estimate.
