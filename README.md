@@ -23,6 +23,20 @@ This repository is a fork of drmpeg's [gr-dvbs2rx](http://github.com/drmpeg/gr-d
 - The flexible `dvbs2-tx` and `dvbs2-rx` command-line applications.
 - A new BCH decoder implementation that is approximately 2.5x faster than the original (introduced in version 1.3.0)
 
+## DVB-S2X mode-166 demapper
+
+The normal-frame 16APSK 25/36 demapper supports ETSI EN 302 307-2 V1.4.1
+Table 17a mode 166 (PLS 166/167, pilots off/on). It uses the Table 11a
+linear-channel radius ratio 2.77 and Table 9a interleaver pattern 2310,
+with the existing normal 25/36 LDPC/BCH blocks. Short 25/36 frames are
+rejected. The demapper QA compares three complete frames against the
+independent GNU Radio `dtv` transmitter.
+
+This is a demapper/FEC building block, not a claim that the legacy
+`dvbs2-rx` application performs extended-PLS acquisition or mode switching.
+WaveScope supplies its own ordinary-PLHEADER extraction. Other Table 17a
+profiles, VL-SNR framing and Annex E superframes require separate work.
+
 ## License
 
 The project is licensed under GPLv3 and was developed primarily for non-commercial research, experimentation, and education. Please feel free to contribute or get in touch to request features or report any problems.
