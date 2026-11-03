@@ -9,11 +9,13 @@
 from gnuradio import gr, gr_unittest
 
 try:
-    from gnuradio.dvbs2rx import (C3_4, C3_5, FECFRAME_NORMAL, FECFRAME_SHORT,
-                                  MOD_32APSK, MOD_QPSK, xfecframe_demapper_cb)
+    from python.dvbs2rx import (C3_4, C3_5, C25_36, FECFRAME_NORMAL,
+                                FECFRAME_SHORT, MOD_16APSK, MOD_32APSK,
+                                MOD_QPSK, xfecframe_demapper_cb)
 except ImportError:
-    from python.dvbs2rx import (C3_4, C3_5, FECFRAME_NORMAL, FECFRAME_SHORT,
-                                MOD_32APSK, MOD_QPSK, xfecframe_demapper_cb)
+    from gnuradio.dvbs2rx import (C3_4, C3_5, C25_36, FECFRAME_NORMAL,
+                                  FECFRAME_SHORT, MOD_16APSK, MOD_32APSK,
+                                  MOD_QPSK, xfecframe_demapper_cb)
 
 
 class qa_xfecframe_demapper_cb(gr_unittest.TestCase):
@@ -31,6 +33,14 @@ class qa_xfecframe_demapper_cb(gr_unittest.TestCase):
     def test_32apsk_short_instance(self):
         instance = xfecframe_demapper_cb(FECFRAME_SHORT, C3_4, MOD_32APSK)
         assert (instance is not None)
+
+    def test_s2x_16apsk_25_36_instance(self):
+        instance = xfecframe_demapper_cb(FECFRAME_NORMAL, C25_36, MOD_16APSK)
+        assert (instance is not None)
+
+    def test_s2x_16apsk_25_36_rejects_short_frames(self):
+        with self.assertRaises(RuntimeError):
+            xfecframe_demapper_cb(FECFRAME_SHORT, C25_36, MOD_16APSK)
 
 
 if __name__ == '__main__':

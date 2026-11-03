@@ -93,6 +93,11 @@ xfecframe_demapper_cb_impl::xfecframe_demapper_cb_impl(dvb_framesize_t framesize
         case C9_10:
             outer_inner_ratio = 2.57;
             break;
+        case C25_36:
+            if (framesize != FECFRAME_NORMAL)
+                throw std::runtime_error("16APSK 25/36 requires a normal FECFRAME");
+            outer_inner_ratio = 2.77;
+            break;
         default:
             throw std::runtime_error("Unsupported 16APSK code rate");
         }
@@ -102,6 +107,13 @@ xfecframe_demapper_cb_impl::xfecframe_demapper_cb_impl(dvb_framesize_t framesize
         d_rowaddr1 = rows;
         d_rowaddr2 = rows * 2;
         d_rowaddr3 = rows * 3;
+        if (rate == C25_36) {
+            // DVB-S2X Table 9a: 4+12APSK 25/36 interleaver pattern 2310.
+            d_rowaddr0 = rows * 2;
+            d_rowaddr1 = rows * 3;
+            d_rowaddr2 = rows;
+            d_rowaddr3 = 0;
+        }
     } else if (constellation == MOD_32APSK) {
         float outer_inner_ratio;
         float middle_inner_ratio;

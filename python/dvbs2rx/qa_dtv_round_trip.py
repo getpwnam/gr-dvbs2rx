@@ -6,6 +6,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
+import random
 from math import pi
 
 import numpy as np
@@ -13,17 +14,17 @@ import pmt
 from gnuradio import blocks, dtv, gr, gr_unittest
 
 try:
-    from gnuradio.dvbs2rx import (C3_4, C4_5, C5_6, FECFRAME_NORMAL,
-                                  FECFRAME_SHORT, INFO_OFF, MOD_16APSK,
-                                  MOD_32APSK, OM_MESSAGE, STANDARD_DVBS2,
-                                  bch_decoder_bb, ldpc_decoder_bb, plsync_cc,
-                                  rotator_cc, xfecframe_demapper_cb)
-except ImportError:
-    from python.dvbs2rx import (C3_4, C4_5, C5_6, FECFRAME_NORMAL,
+    from python.dvbs2rx import (C3_4, C4_5, C5_6, C25_36, FECFRAME_NORMAL,
                                 FECFRAME_SHORT, INFO_OFF, MOD_16APSK,
                                 MOD_32APSK, OM_MESSAGE, STANDARD_DVBS2,
                                 bch_decoder_bb, ldpc_decoder_bb, plsync_cc,
                                 rotator_cc, xfecframe_demapper_cb)
+except ImportError:
+    from gnuradio.dvbs2rx import (C3_4, C4_5, C5_6, C25_36, FECFRAME_NORMAL,
+                                  FECFRAME_SHORT, INFO_OFF, MOD_16APSK,
+                                  MOD_32APSK, OM_MESSAGE, STANDARD_DVBS2,
+                                  bch_decoder_bb, ldpc_decoder_bb, plsync_cc,
+                                  rotator_cc, xfecframe_demapper_cb)
 
 
 class qa_dtv_round_trip(gr_unittest.TestCase):
@@ -33,6 +34,21 @@ class qa_dtv_round_trip(gr_unittest.TestCase):
 
     def tearDown(self):
         self.tb = None
+
+    def test_s2x_16apsk_25_36_recovers_independent_transmitter_bits(self):
+        rng = random.Random(166)
+        expected = [rng.getrandbits(1) for _ in range(3 * 64800)]
+        source = blocks.vector_source_b(expected, False)
+        interleaver = dtv.dvbs2_interleaver_bb(dtv.FECFRAME_NORMAL, dtv.C25_36,
+                                               dtv.MOD_16APSK)
+        mapper = dtv.dvbs2_modulator_bc(dtv.FECFRAME_NORMAL, dtv.C25_36,
+                                        dtv.MOD_16APSK, dtv.INTERPOLATION_OFF)
+        demapper = xfecframe_demapper_cb(FECFRAME_NORMAL, C25_36, MOD_16APSK)
+        sink = blocks.vector_sink_b()
+        self.tb.connect(source, interleaver, mapper, demapper, sink)
+        self.tb.run()
+        actual = [int(value >= 128) for value in sink.data()]
+        self.assertEqual(actual, expected)
 
     def test_pilotless_carrier_rotator_transitions(self):
         for order, constellation, rate, modcod in (
